@@ -1,0 +1,36 @@
+{
+ "app": "P&G Power Unit Workflow",
+ "version": 1,
+ "repo": {
+  "owner": "pgpowerbilling",
+  "repo": "eversource-workflow",
+  "branch": "main",
+  "base": ""
+ },
+ "users": {
+  "b05047f936a8f53a1a90cd4dbd27c33682cb2ae9efe2d4c4de7cc94c39bd411d": {
+   "salt": "zdLb0o91XlTBQms/Gxgh5Q==",
+   "iter": 310000,
+   "iv": "xrZLp1tRxDpjJdkq",
+   "wrapped": "Sng9pe/cfHARQXDHH6C4ahHsOByW6gJqjFHqQNXyODBD43eDe78t9c1rKU4UrABD"
+  },
+  "91bfa2ab03bc935b0f782affdfc6471c33fc96171fdc8c0cf00a24ccb7aa13b6": {
+   "salt": "NUrS4tVvjNcVFqiMbR9R1A==",
+   "iter": 310000,
+   "iv": "s+ZTm7q66MjvLHVS",
+   "wrapped": "CQVaN1I9TXfN/xIQKYs1HEWyAAEnuBWwWyteHAe+tnJAuy5hhiKlnjgJ1n2Moa1g"
+  },
+  "240f5b515b6378a79b81dfd6f3bfa652e233c2f2e691a534b01075d7cca4f380": {
+   "salt": "0QzVmdgkdwgnmN89tbPYvw==",
+   "iter": 310000,
+   "iv": "7XEqHubbz1WR9/l+",
+   "wrapped": "AdXhpiH7n4RghZ5rjc4lk/Hy0pjp3rl46+AJxSISkNWkY5Slxjivdh6LBPMtc2xy"
+  },
+  "f5d37f637e8e8738f102da7ca330364b811072a38bff141b8da278a633490b84": {
+   "salt": "ZiIjZyQOC6Pp297F0tSRRQ==",
+   "iter": 310000,
+   "iv": "QYZtm8UgwLvE6Ojs",
+   "wrapped": "TvvNkLPBguPSWE9p1iUCpacxXSx10ZcEAgJGAV1KizP01jcxXlN2iO19pWLsEp7a"
+  }
+ }
+}
