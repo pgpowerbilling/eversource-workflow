@@ -295,6 +295,7 @@ function teDetailsHtml(d){const j=jobById(d.jobId);
   return dl("Location",p?esc(p.esPole+" — "+p.street+(p.town?", "+p.town:"")):'<span class="late">No location</span>',true)+(p?dl("Ticket ID",esc(p.ticket)):"")+dl("Location complete",d.locComplete?'<span class="chip c-done">Yes — marked complete</span>':"No")+dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("Work order #",esc(d.wo))+
     dl("T&E pricing",teJobSet(j)?esc(teJobSet(j).name+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+j.teArea:"")):'<span class="late">Not set on the job</span>')+dl("Rate year",esc(yearOf(d.workDate)||""))+dl("Crew",esc(teSummary(d)))+
     dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
+    (d.source?dl("Daily timesheet file",'<button class="btn sm" type="button" id="a-src">'+esc(d.source.name)+"</button>"+(d.imported?' <span class="sub">column '+esc(d.imported.column)+"</span>":"")):"")+(d.imported&&d.imported.custRep?dl("Customer rep",esc(d.imported.custRep)):"")+
     (d.scan?dl("Paper timesheet",'<button class="btn sm" type="button" id="a-scan">'+esc(d.scan.name)+"</button>"):"")+(d.notes?dl("Notes",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"");}
 function teBodyHtml(d){
   const priced=can.seePrice();const pr=priceTe(d);const by=c=>pr.lines.filter(l=>l.cat===c);
@@ -319,7 +320,7 @@ function renderTeJob(j){
   let appr=0,apprOk=true;ss.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceTe(s).total;if(t==null)apprOk=false;else appr+=t;});
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
     '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+esc(j.teArea):"")+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+'</div></div><div class="acts">'+
-      (can.newSheet()&&!j.archived?'<button class="btn primary" type="button" id="tj-new">+ New T&amp;E timesheet</button>':"")+'<button class="btn" type="button" id="tj-print">Print blank timesheet</button>'+
+      (can.newSheet()&&!j.archived?'<button class="btn primary" type="button" id="tj-new">+ New T&amp;E timesheet</button><button class="btn" type="button" id="tj-imp">Upload filled timesheet (.xlsx)</button>':"")+'<button class="btn" type="button" id="tj-print">Print blank timesheet</button>'+
       (can.setup()?'<button class="btn" type="button" id="tj-add">+ Add locations</button><button class="btn" type="button" id="tj-roster">Crew roster</button><button class="btn" type="button" id="tj-edit">Edit job</button>':"")+(role()!=="crew"?'<button class="btn" type="button" id="tj-csv">Export CSV</button>':"")+"</div></section>"+
     (!teJobSet(j)&&role()!=="crew"?'<div class="banner">No T&amp;E pricing is picked for this job, so its timesheets can\'t be priced. Pick it with <b>Edit job</b>.</div>':(teJobSet(j)&&!teJobArea(j,teJobSet(j))&&role()!=="crew"?'<div class="banner">'+esc(teJobSet(j).name)+' has different labor rates by service area. Pick the service area with <b>Edit job</b>.</div>':""))+
     (role()!=="crew"&&((j.packages||[]).length||can.setup())?'<div class="pkgbar"><b>Job package</b>'+(j.packages||[]).map((pk,i)=>'<button class="btn sm" type="button" data-pk="'+i+'">'+esc(pk.name)+' <span class="sub">'+fmtSize(pk.size)+"</span></button>").join("")+((j.packages||[]).length?"":'<span class="sub">None uploaded</span>')+(can.setup()?'<button class="btn sm primary" type="button" id="tj-pkg">Upload package</button>':"")+"</div>":"")+
@@ -327,7 +328,7 @@ function renderTeJob(j){
     '<div class="subtabs" role="tablist"><button role="tab" type="button" id="t-locs" aria-selected="'+(tab==="locs")+'">Locations ('+locs.length+')</button><button role="tab" type="button" id="t-sheets" aria-selected="'+(tab==="sheets")+'">Timesheets ('+ss.length+")</button>"+(canGfSign()?'<button role="tab" type="button" id="t-gf" aria-selected="'+(tab==="gf")+'">CM sign-off ('+gfList.length+")</button>":"")+'</div><div id="jbody"></div>';
   const on=(i,fn)=>{const b=document.getElementById(i);if(b)b.onclick=fn;};
   on("t-locs",()=>{S.jobTab="locs";renderJob();});on("t-sheets",()=>{S.jobTab="sheets";renderJob();});on("t-gf",()=>{S.jobTab="gf";renderJob();});
-  on("tj-new",()=>openTeForm(null,j.id));on("tj-print",()=>printTeSheet(j,null));on("tj-add",()=>openAddLocations(j.id));on("tj-roster",openRoster);on("tj-edit",()=>{location.hash="jobedit-"+j.id;});on("tj-pkg",()=>openAddLocations(j.id,true));
+  on("tj-new",()=>openTeForm(null,j.id));on("tj-imp",()=>openTeImport(j.id));on("tj-print",()=>printTeSheet(j,null));on("tj-add",()=>openAddLocations(j.id));on("tj-roster",openRoster);on("tj-edit",()=>{location.hash="jobedit-"+j.id;});on("tj-pkg",()=>openAddLocations(j.id,true));
   main.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>openPackage(j.packages[+b.dataset.pk],b));
   on("tj-csv",()=>{const head=["Timesheet #","Work date","Location","Ticket ID","Location complete","Crew lead","Name","Classification","ST hrs","OT hrs","DT hrs","Per diem","Lodging","Status","Invoice #"];
     const L=[head];ss.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))).forEach(s=>{const p=poleById(j,s.poleId);(s.labor||[]).forEach(x=>L.push([s.no,fmtD(s.workDate),sheetPoleText(s),p?p.ticket:"",s.locComplete?"Y":"",s.crew,x.name,x.role,x.st||0,x.ot||0,x.dt||0,x.pd?"Y":"",x.lodge?"Y":"",ST_LABEL[s.status]||s.status,s.invoiceNo||""]));});
@@ -425,3 +426,115 @@ function printTeInvoice(i){
     '<div class="pv-break"></div>'+head+'<h2 class="pv-h2">DAILY DETAIL</h2>'+i.days.map(d=>teInvDayHtml(d,true)).join("")+'<table class="pv-lines"><tfoot><tr><td class="num">INVOICE TOTAL (USD)</td><td class="num" style="width:140px">'+money(i.total)+"</td></tr></tfoot></table></div>";
   document.body.classList.add("printing");const prev=document.title;document.title="P&G T&E Invoice "+i.no;
   const done=()=>{document.body.classList.remove("printing");document.title=prev;window.removeEventListener("afterprint",done);};window.addEventListener("afterprint",done);setTimeout(()=>window.print(),200);}
+
+/* ---------- upload a filled Eversource "Contractor Daily Time Sheet" (.xlsx) ----------
+   One sheet = one crew, one day, up to 6 work order columns. Each work order column with hours becomes one T&E
+   timesheet for the job location whose WO / Job # matches the column's Work Order or Field Work Order number.
+   Labor: Name, Class and S.T. / T.H. (time-and-a-half = OT) / D.T. hours per column. Code V (vacation) and S (sick)
+   rows are not billed. Equipment: description and hours per column, billed by the hour (idle and in-repair included).
+   The SSN and Pay Rate columns are never read. Class and equipment names are matched to the job's T&E pricing once;
+   the matches are remembered for later uploads. */
+const teNorm=v=>String(v==null?"":v).toUpperCase().replace(/[^A-Z0-9]/g,"");
+function xlDate(v){if(typeof v==="number"&&v>30000&&v<80000){const d=new Date(Date.UTC(1899,11,30)+Math.round(v)*864e5);return d.toISOString().slice(0,10);}
+  const s=String(v==null?"":v).trim();let m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);if(m)return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
+  m=/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(s);if(m){const y=m[3].length===2?"20"+m[3]:m[3];return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}return"";}
+function parseDailyTimesheet(aoa){
+  const s=v=>String(v==null?"":v).replace(/\s+/g," ").trim();const num=v=>{if(typeof v==="number")return isFinite(v)?v:0;const t=s(v).replace(/,/g,"");return /^-?\d+(\.\d+)?$/.test(t)?+t:0;};
+  const row=r=>aoa[r]||[];const find=(re,from,to)=>{for(let r=from||0;r<Math.min(aoa.length,to||aoa.length);r++){const c=row(r).findIndex(v=>re.test(s(v)));if(c>=0)return{r,c};}return null;};
+  if(!find(/daily time sheet/i,0,4))throw new Error('This doesn\'t look like the Eversource "Contractor Daily Time Sheet" (no "DAILY TIME SHEET" title found).');
+  const LABELS=["Customer","Town","Page","% Complete","Project #","Foreperson","Day","Crew #","Type of Work","General Foreperson","Date","Contract #"];
+  const isLabel=t=>LABELS.some(l=>t.toLowerCase().startsWith(l.toLowerCase()));
+  const hv=(label,r0,r1)=>{for(let r=r0;r<r1;r++){const rw=row(r);for(let c=0;c<rw.length;c++){const t=s(rw[c]);if(!t.toLowerCase().startsWith(label.toLowerCase()))continue;
+        if(label==="Foreperson"&&/^general/i.test(t))continue;
+        const rest=t.slice(label.length).replace(/^[\s:#.-]+/,"").trim();if(rest)return rest;
+        for(let k=c+1;k<rw.length;k++){const v=rw[k];if(v==null||s(v)==="")continue;if(typeof v!=="number"&&isLabel(s(v)))break;return v;}return"";}}return"";};
+  const head={town:s(hv("Town",1,5)),foreperson:s(hv("Foreperson",1,5)),gf:s(hv("General Foreperson",1,5)),project:s(hv("Project #",1,5)),contract:s(hv("Contract #",1,5)),crewNo:s(hv("Crew #",1,5)),day:s(hv("Day",1,5)),typeOfWork:s(hv("Type of Work",1,5)),pct:s(hv("% Complete",1,5))};
+  let dv=hv("Date",1,5);head.date=xlDate(dv);
+  if(!head.date){for(let r=1;r<5&&!head.date;r++)for(const v of row(r))if(typeof v==="number"&&v>30000&&v<80000){head.date=xlDate(v);break;}}
+  const lh=find(/^code$/i,4,20);if(!lh||!/name/i.test(s(row(lh.r)[2])))throw new Error("The labor header row (Code / SSN / Name / Class) wasn't found.");
+  const hr=row(lh.r);const stCols=[];hr.forEach((v,c)=>{if(/^s\.?\s?t\.?$/i.test(s(v)))stCols.push(c);});
+  const totR=find(/^total$/i,3,lh.r);const totC=totR?totR.c:(stCols.length?stCols[stCols.length-1]:99);
+  const gcols=stCols.filter(c=>c<totC);if(!gcols.length)throw new Error("No work order columns (S.T. / T.H. / D.T.) were found.");
+  const lr=t=>{const f=find(t,3,lh.r);return f?f.r:-1;};const rF=lr(/^field work order/i),rW=lr(/^work order/i),rL=lr(/^check ls/i);
+  const groups=gcols.map((c,i)=>{const cell=r=>r<0?"":s(row(r)[c]);const lsv=cell(rL),oos=rL>=0?s(row(rL+1)[c]):"";
+    return{i,col:c,fwo:cell(rF),wo:cell(rW),ls:/^ls$/i.test(lsv)?"":lsv.replace(/^ls\s*/i,""),oos:oos.replace(/^oos#?\s*/i,"")};});
+  const endL=find(/^n\s*=\s*new/i,lh.r+1);const labor=[];
+  for(let r=lh.r+1;r<(endL?endL.r:lh.r+25);r++){const rw=row(r);const name=s(rw[2]);/* columns B (SSN) and E (Pay Rate) are deliberately never read */
+    const code=s(rw[0]).toUpperCase(),cls=s(rw[3]);const hrs=gcols.map(c=>({st:num(rw[c]),ot:num(rw[c+1]),dt:num(rw[c+2])}));const any=hrs.some(h=>h.st||h.ot||h.dt);
+    if(!name&&!any)continue;const tot=totC<99?{st:num(rw[totC]),ot:num(rw[totC+1]),dt:num(rw[totC+2])}:null;labor.push({r,code,name,cls,hrs,tot});}
+  const eh=find(/^equipment description/i,lh.r);const equip=[];
+  if(eh){const ehr=row(eh.r);const hc=[];ehr.forEach((v,c)=>{if(/^hours$/i.test(s(v)))hc.push(c);});const tc=ehr.findIndex(v=>/^total hours$/i.test(s(v)));const numC=ehr.findIndex(v=>/^equipment number$/i.test(s(v)));
+    const endE=find(/^i\s*=\s*idle/i,eh.r+1);
+    for(let r=eh.r+1;r<(endE?endE.r:eh.r+20);r++){const rw=row(r);const desc=s(rw[eh.c]);const hrs=hc.slice(0,gcols.length).map(c=>num(rw[c]));if(!desc&&!hrs.some(Boolean))continue;
+      equip.push({r,code:s(rw[0]).toUpperCase(),desc,num:numC>=0?s(rw[numC]):"",hrs,tot:tc>=0?num(rw[tc]):null});}}
+  const cm=find(/^description of work/i,eh?eh.r:lh.r);let comments="";if(cm){comments=s(row(cm.r)[cm.c]).replace(/^description of work or comments:?/i,"").trim();if(!comments){const nx=row(cm.r+1);if(!/^foreman/i.test(s(nx[0])))comments=s(nx.map(s).filter(Boolean).join(" "));}}
+  const fm=find(/^foreman/i,cm?cm.r:lh.r);let foreman="",custRep="";if(fm){const t=row(fm.r).map(s).filter(Boolean).join(" ");const m=/foreman:?\s*(.*?)\s*customer representative:?\s*(.*)$/i.exec(t);if(m){foreman=m[1].trim();custRep=m[2].trim();}else foreman=t.replace(/^foreman:?/i,"").trim();}
+  return{head,groups,labor,equip,comments,foreman,custRep};}
+function teSuggest(text,options){const words=t=>new Set(String(t).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(" ").filter(w=>w.length>1));const a=words(text);if(!a.size)return"";
+  let best="",bs=0;options.forEach(o=>{const b=words(o);let n=0;a.forEach(w=>{if(b.has(w))n++;});const sc=n/Math.max(a.size,b.size);if(sc>bs){bs=sc;best=o;}});return bs>=0.34?best:"";}
+function openTeImport(jobId){
+  const j=jobById(jobId);if(!j||!can.newSheet()){canSave();return;}const set=teJobSet(j);
+  if(!set){toast("Pick the job's T&E pricing first (Edit job).",7000);return;}
+  const m=modal("Upload filled daily timesheet",'<p class="sub" style="margin:0">Choose the filled Eversource <b>Contractor Daily Time Sheet</b> (.xlsx). Each work order column with hours becomes a T&amp;E timesheet for the matching location on <b>'+esc(j.name)+'</b>. The SSN and Pay Rate columns are never read. Review everything before it\'s submitted to the CM.</p>'+
+    '<label class="f" for="ti-file">Filled timesheet (.xlsx)<input type="file" id="ti-file" accept=".xlsx"></label><label class="f" for="ti-scan">Photo or PDF of the signed paper copy<input type="file" id="ti-scan" accept="application/pdf,image/*"></label><div id="ti-prev"></div>',
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="ti-save" disabled>Submit to CM</button>',"wide");
+  const alias=(S.index&&S.index.teAlias)||{role:{},equip:{}};const roles=teRoleNames(set),items=teEquipNames(set);
+  let P=null,file=null,st=null;
+  m.querySelector("#ti-file").onchange=async ev=>{file=ev.target.files[0];if(!file)return;const pv=m.querySelector("#ti-prev");pv.innerHTML='<p class="sub">Reading…</p>';m.querySelector("#ti-save").disabled=true;
+    try{const book=await TMPL.tables(await file.arrayBuffer());P=parseDailyTimesheet(await book.get(book.names[0]));}catch(e){P=null;pv.innerHTML='<div class="err">'+esc(errText(e))+"</div>";return;}
+    const locs=j.poles||[];
+    const used=P.groups.map((g,gi)=>({g,gi,lab:P.labor.filter(L=>L.hrs[gi]&&(L.hrs[gi].st||L.hrs[gi].ot||L.hrs[gi].dt)),eq:P.equip.filter(E=>E.hrs[gi])})).filter(x=>x.lab.length||x.eq.length);
+    st={date:P.head.date,crew:P.head.foreperson||P.foreman,cols:used.map(x=>{const keys=[x.g.wo,x.g.fwo].map(teNorm).filter(Boolean);const p=locs.find(pp=>keys.length&&keys.includes(teNorm(pp.woJob)));return{gi:x.gi,poleId:p?p.id:"",done:false};}),
+      role:{},equip:{}};
+    P.labor.forEach(L=>{const k=teNorm(L.cls);if(!(k in st.role)){const known=alias.role[k];st.role[k]=known&&roles.some(r=>r.role===known)?known:(roles.some(r=>r.role===L.cls)?L.cls:teSuggest(L.cls,roles.map(r=>r.role)));}});
+    P.equip.forEach(E=>{const k=teNorm(E.desc);if(!(k in st.equip)){const known=alias.equip[k];st.equip[k]=known&&items.some(r=>r.item===known)?known:(items.some(r=>r.item===E.desc)?E.desc:teSuggest(E.desc,items.map(r=>r.item)));}});
+    draw();};
+  function checks(){const out=[];
+    P.labor.forEach(L=>{if(!L.tot)return;const sum=k=>L.hrs.reduce((a,h)=>a+h[k],0);[["st","S.T."],["ot","T.H."],["dt","D.T."]].forEach(([k,l])=>{if(L.tot[k]&&Math.abs(sum(k)-L.tot[k])>1e-9)out.push((L.name||"Row "+(L.r+1))+": "+l+" columns add to "+fmtN(sum(k))+" but the TOTAL column says "+fmtN(L.tot[k]));});});
+    P.equip.forEach(E=>{const sm=E.hrs.reduce((a,h)=>a+h,0);if(E.tot&&Math.abs(sm-E.tot)>1e-9)out.push((E.desc||"Equipment row "+(E.r+1))+": hours add to "+fmtN(sm)+" but Total Hours says "+fmtN(E.tot));});return out;}
+  function draw(){const pv=m.querySelector("#ti-prev");const locs=j.poles||[];const skip=P.labor.filter(L=>/^[VS]$/.test(L.code));const bill=P.labor.filter(L=>!/^[VS]$/.test(L.code));
+    const clsKeys=[...new Set(bill.filter(L=>L.hrs.some(h=>h.st||h.ot||h.dt)).map(L=>teNorm(L.cls)))];const eqKeys=[...new Set(P.equip.filter(E=>E.hrs.some(Boolean)).map(E=>teNorm(E.desc)))];
+    const clsLabel=k=>(bill.find(L=>teNorm(L.cls)===k)||{}).cls||"(blank)";const eqLabel=k=>(P.equip.find(E=>teNorm(E.desc)===k)||{}).desc||"(blank)";const ck=checks();
+    pv.innerHTML='<section class="details" style="display:block"><fieldset><legend>From the timesheet</legend>'+
+      '<label class="f" for="ti-date">Date'+(P.head.date?"":' <span class="late">not found — enter it</span>')+'<input type="date" id="ti-date" value="'+esc(st.date)+'"></label>'+
+      '<label class="f" for="ti-crew">Crew lead (Foreperson)<input id="ti-crew" value="'+esc(st.crew)+'"></label>'+
+      '<div class="f wide sub">Town: '+esc(P.head.town||"—")+" · General Foreperson: "+esc(P.head.gf||"—")+" · Crew #: "+esc(P.head.crewNo||"—")+" · Project #: "+esc(P.head.project||"—")+" · Contract #: "+esc(P.head.contract||"—")+(P.head.typeOfWork?" · Type of work: "+esc(P.head.typeOfWork):"")+(P.custRep?" · Customer rep: "+esc(P.custRep):"")+"</div></fieldset></section>"+
+      (ck.length?'<div class="banner bad"><b>Totals don\'t tie on the sheet:</b><br>'+ck.map(esc).join("<br>")+"<br>The work order columns are what get billed. Fix the sheet or the timesheets after import if needed.</div>":'<div class="okbox">Every row\'s work order columns add up to its TOTAL column.</div>')+
+      '<div class="sec-h" style="margin-top:10px">Work orders → locations</div>'+(st.cols.length?st.cols.map((c,i)=>{const g=P.groups[c.gi];const lab=bill.filter(L=>{const h=L.hrs[c.gi];return h&&(h.st||h.ot||h.dt);});const hrs=lab.reduce((a,L)=>a+L.hrs[c.gi].st+L.hrs[c.gi].ot+L.hrs[c.gi].dt,0);const eq=P.equip.filter(E=>E.hrs[c.gi]);
+        return'<div class="te-row" style="grid-template-columns:minmax(180px,1.2fr) minmax(220px,2fr) auto;margin-bottom:6px"><div><b>Column '+(c.gi+1)+"</b><div class=\"sub\">"+esc([g.wo?"WO "+g.wo:"",g.fwo?"FWO "+g.fwo:"",g.oos?"OOS "+g.oos:"",g.ls?"LS "+g.ls:""].filter(Boolean).join(" · ")||"No work order #")+"</div><div class=\"sub\">"+lab.length+" people · "+fmtN(hrs)+" hrs · "+eq.length+" equipment</div></div>"+
+          '<label class="f">Location'+(c.poleId?' <span class="chip c-done">matched by WO #</span>':' <span class="late">pick one</span>')+'<select data-col="'+i+'"><option value="">Select location…</option>'+locs.map(p=>'<option value="'+esc(p.id)+'"'+(p.id===c.poleId?" selected":"")+">"+esc(p.esPole+" — "+p.street+(p.woJob?" · WO "+p.woJob:""))+"</option>").join("")+"</select></label>"+
+          '<label class="te-chk"><input type="checkbox" data-done="'+i+'"'+(c.done?" checked":"")+">Location complete</label></div>";}).join(""):'<p class="sub">No hours were found in any work order column.</p>')+
+      '<div class="sec-h" style="margin-top:10px">Classifications → '+esc(set.name)+"</div>"+clsKeys.map(k=>'<div class="row-inline" style="margin-bottom:6px"><span style="min-width:180px"><b>'+esc(clsLabel(k))+'</b> <span class="sub">('+bill.filter(L=>teNorm(L.cls)===k).map(L=>esc(L.name)).join(", ")+")</span></span>"+roleSelect(st.role[k],roles,' data-role="'+esc(k)+'"')+"</div>").join("")+
+      (eqKeys.length?'<div class="sec-h" style="margin-top:10px">Equipment → '+esc(set.name)+' <span class="sub">(billed by the hour; idle and in-repair included)</span></div>'+eqKeys.map(k=>{const rows=P.equip.filter(E=>teNorm(E.desc)===k);return'<div class="row-inline" style="margin-bottom:6px"><span style="min-width:180px"><b>'+esc(eqLabel(k))+'</b> <span class="sub">'+esc(rows.map(E=>[E.num?"#"+E.num:"",E.code?"code "+E.code:""].filter(Boolean).join(" ")).filter(Boolean).join(", "))+"</span></span>"+equipSelect(st.equip[k],set).replace("<select",'<select data-eq="'+esc(k)+'"')+"</div>";}).join(""):"")+
+      (skip.length?'<p class="sub" style="margin-top:8px">Not billed (code V vacation / S sick): '+esc(skip.map(L=>L.name+" ("+L.code+")").join(", "))+"</p>":"")+
+      '<p class="sub" style="margin-top:8px">Per diem and lodging aren\'t on this form; tick them on each timesheet after import if they apply.'+(P.comments?" Description of work goes into each timesheet's notes.":"")+"</p>";
+    pv.querySelectorAll("[data-col]").forEach(el=>el.onchange=()=>{st.cols[+el.dataset.col].poleId=el.value;});
+    pv.querySelectorAll("[data-done]").forEach(el=>el.onchange=()=>{st.cols[+el.dataset.done].done=el.checked;});
+    pv.querySelectorAll("[data-role]").forEach(el=>el.onchange=()=>{st.role[el.dataset.role]=el.value;});
+    pv.querySelectorAll("[data-eq]").forEach(el=>el.onchange=()=>{st.equip[el.dataset.eq]=el.value;});
+    m.querySelector("#ti-date").oninput=e=>{st.date=e.target.value;};m.querySelector("#ti-crew").oninput=e=>{st.crew=e.target.value;};
+    m.querySelector("#ti-save").disabled=!st.cols.length;m.querySelector("#ti-save").textContent="Submit "+st.cols.length+" timesheet"+(st.cols.length===1?"":"s")+" to CM";}
+  m.querySelector("#ti-save").onclick=e=>busyRun(e.target,m,async()=>{if(!P)return;
+    if(!st.date)throw new Error("Enter the date.");if(!String(st.crew||"").trim())throw new Error("Enter the crew lead.");
+    const miss=st.cols.filter(c=>!c.poleId).map(c=>c.gi+1);if(miss.length)throw new Error("Pick the location for work order column "+miss.join(", ")+".");
+    const dup=st.cols.map(c=>c.poleId).filter((p,i,a)=>a.indexOf(p)!==i);if(dup.length)throw new Error("Two work order columns point at the same location. Each column needs its own location.");
+    const bill=P.labor.filter(L=>!/^[VS]$/.test(L.code));
+    for(const L of bill){const h=L.hrs.some(x=>x.st||x.ot||x.dt);if(!h)continue;if(!L.name)throw new Error("A labor row with hours has no name (row "+(L.r+1)+" of the sheet).");if(!st.role[teNorm(L.cls)])throw new Error("Match the classification "+(L.cls||"(blank)")+" for "+L.name+".");
+      const day=L.hrs.reduce((a,x)=>a+x.st+x.ot+x.dt,0);if(day>24)throw new Error(L.name+" has "+fmtN(day)+" hours on the sheet. A day can't be more than 24.");}
+    for(const E of P.equip)if(E.hrs.some(Boolean)&&!st.equip[teNorm(E.desc)])throw new Error("Match the equipment "+(E.desc||"(blank)")+".");
+    const ex=st.cols.map(c=>sheets().find(x=>isTe(x)&&x.jobId===j.id&&x.poleId===c.poleId&&x.workDate===st.date)).filter(Boolean);
+    if(ex.length&&!confirm("There's already a T&E timesheet on "+fmtD(st.date)+" for "+ex.map(x=>x.no+" ("+sheetPoleText(x)+")").join(", ")+". Import anyway?"))return;
+    if(!canSave())return;
+    e.target.textContent="Uploading files…";const src=await storePackage(file);const scanF=m.querySelector("#ti-scan").files[0];const scan=scanF?await storePackage(scanF):null;
+    const names=[...new Set(bill.filter(L=>L.name).map(L=>L.name))];
+    await commitIndex(ix=>{ix.teAlias=ix.teAlias||{role:{},equip:{}};Object.entries(st.role).forEach(([k,v])=>{if(k&&v)ix.teAlias.role[k]=v;});Object.entries(st.equip).forEach(([k,v])=>{if(k&&v)ix.teAlias.equip[k]=v;});
+      ix.roster=ix.roster||[];names.forEach(n=>{if(!ix.roster.some(p=>p.name.toLowerCase()===n.toLowerCase())){const L=bill.find(x=>x.name===n);ix.roster.push({id:newId("w-"),name:n,role:st.role[teNorm(L.cls)]||"",addedBy:S.me.name,addedAt:new Date().toISOString()});}});},"Workflow: timesheet import matches and roster");
+    const made=[];
+    for(const c of st.cols){const g=P.groups[c.gi];e.target.textContent="Saving "+(made.length+1)+" of "+st.cols.length+"…";
+      const labor=bill.filter(L=>{const h=L.hrs[c.gi];return h&&(h.st||h.ot||h.dt);}).map(L=>{const h=L.hrs[c.gi];const p=roster().find(x=>x.name.toLowerCase()===L.name.toLowerCase());return{pid:p?p.id:"",name:L.name,role:st.role[teNorm(L.cls)],st:h.st,ot:h.ot,dt:h.dt,pd:false,lodge:false};});
+      const equip=P.equip.filter(E=>E.hrs[c.gi]).map(E=>({item:st.equip[teNorm(E.desc)],basis:"hour",qty:E.hrs[c.gi],unitNo:E.num,code:E.code}));
+      const notes=[P.comments,P.head.typeOfWork?"Type of work: "+P.head.typeOfWork:"",P.head.pct?"% complete: "+P.head.pct:"","Imported from "+file.name+", work order column "+(c.gi+1)+(g.oos?" · OOS "+g.oos:"")+(g.ls?" · LS "+g.ls:"")].filter(Boolean).join("\n");
+      const patch={kind:"te",jobId:j.id,poleId:c.poleId,poleText:"",workDate:st.date,crew:st.crew.trim(),wo:g.wo||g.fwo||"",fwo:g.fwo||"",notes,labor,equip,subs:[],locComplete:c.done,photos:{},source:src,scan:scan||undefined,status:ST.SUB,submittedAt:new Date().toISOString(),
+        imported:{file:file.name,column:c.gi+1,town:P.head.town,gf:P.head.gf,crewNo:P.head.crewNo,project:P.head.project,contract:P.head.contract,custRep:P.custRep,foreman:P.foreman}};
+      const nid=await createDoc("sheet",patch,"Imported from daily timesheet "+file.name+" (column "+(c.gi+1)+"): "+sheetPoleText(patch)+" · crew "+labor.length+" · "+fmtN(teHours(patch))+" hrs · equipment "+equip.length);if(nid)made.push(nid);}
+    closeOverlay();refresh();toast(made.length+" T&E timesheet"+(made.length===1?"":"s")+" submitted to the CM from "+file.name,7000);});}
