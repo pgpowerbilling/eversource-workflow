@@ -1609,20 +1609,24 @@ function checkLocs(rows,existing){
     const t=L.ticket.trim().toUpperCase();if(t){if(seen.has(t))errs.push("Row "+(i+1)+": Ticket "+L.ticket+" is already on this job.");seen.add(t);}});
   return{used:used.map(L=>{const o={};Object.keys(L).forEach(k=>{if(k[0]!=="_")o[k]=String(L[k]==null?"":L[k]).trim();});return o;}),errs};}
 /* ---------- job fields (Add Job form + Edit job) ---------- */
-const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teArea","T&E service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
-const blankJob=()=>({name:"",billing:"units",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
+const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teSet","T&E pricing *","teset"],["teArea","Service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
+const blankJob=()=>({name:"",billing:"units",teSet:"",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
 function gfNames(){const p=(S.index&&S.index.profiles)||{};return Object.values(p).filter(x=>x.role==="gf").map(x=>x.name).sort();}
 function jobFieldsHtml(pre,v){
   return JOB_FIELDS.map(([k,l,t,wide])=>{const id=pre+"-"+k;const val=v[k]==null?"":v[k];
     if(t==="area")return'<label class="f" data-bill="units" for="'+id+'">'+esc(l)+areaSelect(id,val)+"</label>";
     if(t==="billing")return'<label class="f" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-billsel><option value="units"'+(val!=="te"?" selected":"")+'>Units (unit sheets)</option><option value="te"'+(val==="te"?" selected":"")+">T&amp;E (time &amp; equipment)</option></select></label>";
-    if(t==="tearea"){const ar=teRates()?teRates().areas:[];return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'"><option value="">— not set —</option>'+ar.map(a=>"<option"+(a===val?" selected":"")+">"+esc(a)+"</option>").join("")+(val&&!ar.includes(val)?"<option selected>"+esc(val)+"</option>":"")+"</select></label>";}
+    if(t==="teset"){const ss=teSets();return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-tesetsel><option value="">'+(ss.length?"Select pricing…":"None loaded yet (Rates tab)")+"</option>"+ss.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===val||(!val&&ss.length===1)?" selected":"")+">"+esc(x.name)+"</option>").join("")+"</select></label>";}
+    if(t==="tearea")return'<label class="f" data-bill="te" data-tearea for="'+id+'">'+esc(l)+'<select id="'+id+'" data-val="'+esc(val)+'"></select></label>';
     if(t==="textarea")return'<label class="f wide" for="'+id+'">'+esc(l)+'<textarea id="'+id+'">'+esc(val)+"</textarea></label>";
     if(t==="gf")return'<label class="f" for="'+id+'">'+esc(l)+'<input id="'+id+'" list="'+pre+'-gfl" value="'+esc(val)+'" autocomplete="off"><datalist id="'+pre+'-gfl">'+gfNames().map(n=>"<option>"+esc(n)+"</option>").join("")+"</datalist></label>";
     return'<label class="f'+(wide?" wide":"")+'" for="'+id+'">'+esc(l)+'<input id="'+id+'"'+(t==="date"?' type="date"':"")+' value="'+esc(val)+'"></label>';}).join("");}
-function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te")v.teArea="";return v;}
-function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const upd=()=>{root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(sel.value==="te"?"te":"units");});};sel.addEventListener("change",upd);upd();}
-function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";if(v.billing==="te"&&!v.teArea)return"Pick the T&E service area (it sets which labor rates apply).";
+function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te"){v.teSet="";v.teArea="";}else{const ts=teSetById(v.teSet);if(!ts||teAreaFree(ts))v.teArea="";}return v;}
+function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const ts=root.querySelector("[data-tesetsel]"),aw=root.querySelector("[data-tearea]");const asel=aw&&aw.querySelector("select");
+  const upd=()=>{const te=sel.value==="te";root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(te?"te":"units");});
+    if(aw){const set=ts?teSetById(ts.value):null;const need=te&&set&&!teAreaFree(set);aw.hidden=!need;if(need){const cur=asel.value||asel.dataset.val;asel.innerHTML='<option value="">— pick —</option>'+set.areas.map(a=>"<option"+(a===cur?" selected":"")+">"+esc(a)+"</option>").join("");}}};
+  sel.addEventListener("change",upd);if(ts)ts.addEventListener("change",upd);upd();}
+function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";if(v.billing==="te"){const ts=teSetById(v.teSet);if(!ts)return teSets().length?"Pick the T&E pricing for this job.":"Load the T&E pricing first (Rates tab), then pick it here.";if(!teAreaFree(ts)&&!v.teArea)return ts.name+" has different labor rates by service area. Pick the service area.";}
   if(jobs().some(j=>j.id!==selfId&&j.name.trim().toLowerCase()===v.name.toLowerCase()))return"A job named "+v.name+" already exists.";
   if(v.estStart&&v.estFinish&&v.estFinish<v.estStart)return"Est. finish is before est. start.";return"";}
 
@@ -1958,26 +1962,32 @@ function printInvoice(i){
    Amounts are unrounded until the final total, the same as unit billing. */
 const isTe=d=>!!d&&d.kind==="te";
 const isTeJob=j=>!!j&&j.billing==="te";
-const teRates=()=>(S.index&&S.index.teRates)||null;
+/* T&E pricing sets: one per contract (e.g. "2026–2028 T&E pricing"); each job picks one. A single sheet loaded before sets existed is shown as a set. */
+function teSets(){const ix=S.index||{};const out=(ix.teRateSets||[]).slice();if(ix.teRates)out.push(Object.assign({id:"legacy",name:teSetName(ix.teRates.years)},ix.teRates));return out;}
+const teSetById=id=>teSets().find(x=>x.id===id)||null;
+const teJobSet=j=>j?teSetById(j.teSet):null;
+/* labor rates the same in every service area for every classification and year → jobs on this pricing don't need an area */
+function teAreaFree(set){if(!set)return true;const m=new Map();for(const x of set.labor){const k=x.year+"|"+x.role,v=[x.st,x.ot,x.dt].join(",");if(m.has(k)&&m.get(k)!==v)return false;m.set(k,v);}return true;}
+const teJobArea=(j,set)=>set?((j&&j.teArea&&set.areas.includes(j.teArea))?j.teArea:(teAreaFree(set)?set.areas[0]:"")):"";
 const roster=()=>((S.index&&S.index.roster)||[]).filter(p=>!p.inactive);
 const TE_HRS=[["st","ST","Straight time"],["ot","OT","Overtime"],["dt","DT","Double time"]];
 const TE_BASIS=[["hour","Hours","hourly"],["day","Days","daily"],["month","Months","monthly"]];
 const yearOf=d=>{const m=/^(\d{4})-/.exec(d||"");return m?+m[1]:null;};
 const teHours=d=>(d.labor||[]).reduce((a,L)=>a+TE_HRS.reduce((x,[k])=>x+(Number(L[k])||0),0),0);
 function teSummary(d){const n=(d.labor||[]).length,e=(d.equip||[]).length;return n+" people · "+fmtN(teHours(d))+" hrs"+(e?" · "+e+" equipment":"");}
-function teRoleNames(){const r=teRates();const out=[];if(r)r.labor.forEach(x=>{if(!out.some(o=>o.role===x.role))out.push({role:x.role,group:x.group});});return out;}
-function teEquipNames(){const r=teRates();const out=[];if(r)r.equipment.forEach(x=>{if(!out.some(o=>o.item===x.item))out.push({item:x.item,category:x.category});});return out;}
+function teRoleNames(set){const out=[];(set?[set]:teSets()).forEach(r=>r.labor.forEach(x=>{if(!out.some(o=>o.role===x.role))out.push({role:x.role,group:x.group});}));return out;}
+function teEquipNames(set){const out=[];(set?[set]:teSets()).forEach(r=>r.equipment.forEach(x=>{if(!out.some(o=>o.item===x.item))out.push({item:x.item,category:x.category});}));return out;}
 function lastTe(jobId,beforeId){return sheets().filter(s=>isTe(s)&&s.jobId===jobId&&s.id!==beforeId).sort((a,b)=>String(b.workDate||"").localeCompare(String(a.workDate||""))||String(b.createdAt||"").localeCompare(String(a.createdAt||"")))[0]||null;}
 
 /* ---------- pricing ---------- */
 function priceTe(d){
-  const j=jobById(d.jobId),r=teRates(),area=(j&&j.teArea)||"",yr=yearOf(d.workDate);const errs=[],lines=[];
-  if(!r)errs.push("T&E rates haven't been loaded (Rates tab)");
-  if(!area)errs.push("No T&E service area set on the job");
-  if(!yr)errs.push("No work date, so no rate year");else if(r&&!r.years.includes(yr))errs.push("The rate sheet has no "+yr+" rates");
+  const j=jobById(d.jobId),r=teJobSet(j),area=teJobArea(j,r),yr=yearOf(d.workDate);const errs=[],lines=[];
+  if(!r)errs.push(j&&j.teSet?"The job's T&E pricing was removed (Edit job)":"No T&E pricing picked on the job (Edit job)");
+  else if(!area)errs.push(r.name+" differs by service area; pick the job's service area (Edit job)");
+  if(!yr)errs.push("No work date, so no rate year");else if(r&&!r.years.includes(yr))errs.push(r.name+" has no "+yr+" rates");
   const ok=!!(r&&area&&yr&&r.years.includes(yr));
   (d.labor||[]).forEach(L=>{const rr=ok?r.labor.find(x=>x.area===area&&x.year===yr&&x.role===L.role):null;
-    if(ok&&!rr)errs.push(L.role+" has no "+yr+" rate for "+area);
+    if(ok&&!rr)errs.push(L.role+" has no "+yr+" rate in "+r.name+(teAreaFree(r)?"":" for "+area));
     TE_HRS.forEach(([k,ab])=>{const q=Number(L[k])||0;if(!q)return;const rate=rr&&rr[k]!=null?rr[k]:null;if(rr&&rate==null)errs.push(L.role+" has no "+ab+" rate");
       lines.push({cat:"Labor",item:L.role,who:L.name,type:ab,qty:q,unit:"hr",rate,ext:rate==null?null:q*rate});});});
   (d.equip||[]).forEach(E=>{const b=TE_BASIS.find(x=>x[0]===E.basis)||TE_BASIS[0];const er=ok?r.equipment.find(x=>x.year===yr&&x.item===E.item):null;const rate=er&&er[b[2]]!=null?er[b[2]]:null;
@@ -1990,7 +2000,8 @@ function priceTe(d){
     lines.push({cat:"Subcontractor",item:s.vendor+(s.desc?" — "+s.desc:""),who:"",type:"Cost",qty:1,unit:"ls",rate:amt,ext:amt});
     if(mk==null)errs.push("Subcontractor markup isn't set (Rates tab)");else lines.push({cat:"Subcontractor",item:"Markup "+fmtN(mk)+"% — "+s.vendor,who:"",type:"Markup",qty:1,unit:"ls",rate:amt*mk/100,ext:amt*mk/100});});
   const total=errs.length?null:lines.reduce((a,l)=>a+l.ext,0);
-  return{lines,total,area,year:yr,errs:[...new Set(errs)],job:j,pole:null,te:true};}
+  const label=r?r.name+(yr?" · "+yr+" rates":"")+(r&&area&&!teAreaFree(r)?" · "+area:""):"";
+  return{lines,total,area,year:yr,label,set:r,errs:[...new Set(errs)],job:j,pole:null,te:true};}
 
 /* ---------- rate sheet reader (Eversource MSA Exhibit B: Labor Pricing + Equipment Pricing) ---------- */
 async function parseTeRateBook(book){
@@ -2034,58 +2045,77 @@ async function parseTeRateBook(book){
   const years=[...new Set(labor.map(x=>x.year).concat(equipment.map(x=>x.year)))].sort();
   return{areas,years,labor,equipment,unpriced:[...new Set(unpriced)],equipUnpriced:[...new Set(eunp)]};}
 
-/* ---------- Rates tab: T&E section ---------- */
+/* ---------- Rates tab: T&E pricing sets (one per contract) ---------- */
 function teRatesSection(host){
-  const r=teRates();const ed=canRates()&&S.canWrite;
-  const st=S.teView||(S.teView={area:r?r.areas[0]:"",year:r?(r.years.includes(new Date().getFullYear())?new Date().getFullYear():r.years[0]):""});
-  if(r&&!r.areas.includes(st.area))st.area=r.areas[0];if(r&&!r.years.includes(+st.year))st.year=r.years[0];
-  host.innerHTML='<section class="jobhead" style="margin-top:22px"><div><h1 style="font-size:20px">T&amp;E rates</h1><div class="meta">'+(r?"Rate sheet: <b>"+esc(r.source.name)+"</b> · loaded "+esc(fmtT(r.source.at))+" by "+esc(r.source.by)+" · "+r.areas.length+" service areas · "+esc(r.years.join(", ")):"No T&amp;E rate sheet loaded yet")+'</div></div><div class="acts">'+(ed?'<button class="btn primary" type="button" id="te-up">Load T&amp;E rate sheet</button>':"")+"</div></section>"+
-    '<div class="note">Labor bills by the job\'s service area and the year of the work date; equipment by the year of the work date. Per diem, lodging and the subcontractor markup aren\'t on the Eversource rate sheet, so set them here. Any timesheet that needs one of these while it\'s blank can\'t be invoiced.</div>'+
-    '<section class="details" style="display:block"><fieldset style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))"><legend>Set by billing</legend>'+
-    '<label class="f" for="te-pd">Per diem (USD per person per day)<input id="te-pd" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r&&r.perDiem!=null?r.perDiem:"")+'"'+(ed&&r?"":" disabled")+"></label>"+
-    '<label class="f" for="te-lo">Lodging (USD per person per night)<input id="te-lo" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r&&r.lodging!=null?r.lodging:"")+'"'+(ed&&r?"":" disabled")+"></label>"+
-    '<label class="f" for="te-mk">Subcontractor markup (%)<input id="te-mk" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r&&r.subMarkup!=null?r.subMarkup:"")+'"'+(ed&&r?"":" disabled")+"></label>"+
-    (ed&&r?'<div class="f" style="justify-content:flex-end"><button class="btn primary" type="button" id="te-save">Save</button></div>':"")+
-    '</fieldset><p class="sub" style="margin:6px 0 0">The rate sheet says combined markup on first and later subcontractor tiers can\'t exceed 12%. Blank = not set.</p></section>'+
-    (r?'<div class="filters" style="margin-top:12px"><select id="te-area" aria-label="Service area">'+r.areas.map(a=>"<option"+(a===st.area?" selected":"")+">"+esc(a)+"</option>").join("")+'</select><select id="te-year" aria-label="Rate year">'+r.years.map(y=>"<option"+(+y===+st.year?" selected":"")+">"+y+"</option>").join("")+'</select></div><div id="te-tbls"></div>':"");
-  const up=document.getElementById("te-up");if(up)up.onclick=openTeRateUpload;
+  const sets=teSets();const ed=canRates()&&S.canWrite;
+  const st=S.teView||(S.teView={});if(!sets.some(x=>x.id===st.set))st.set=sets.length?sets[sets.length-1].id:"";
+  const r=teSetById(st.set);
+  if(r){if(!r.areas.includes(st.area))st.area=r.areas[0];if(!r.years.includes(+st.year))st.year=r.years.includes(new Date().getFullYear())?new Date().getFullYear():r.years[0];}
+  const free=r&&teAreaFree(r);const used=r?jobs().filter(j=>j.teSet===r.id).length:0;
+  host.innerHTML='<section class="jobhead" style="margin-top:22px"><div><h1 style="font-size:20px">T&amp;E pricing</h1><div class="meta">'+(sets.length?sets.length+" pricing set"+(sets.length===1?"":"s")+" loaded. Each T&amp;E job picks one.":"No T&amp;E pricing loaded yet")+'</div></div><div class="acts">'+(ed?'<button class="btn primary" type="button" id="te-new">Load new T&amp;E pricing</button>':"")+"</div></section>"+
+    (r?'<div class="filters"><select id="te-set" aria-label="T&amp;E pricing set">'+sets.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===r.id?" selected":"")+">"+esc(x.name)+"</option>").join("")+'</select>'+(ed?'<button class="btn" type="button" id="te-upd">Update this pricing from a new file</button><button class="btn" type="button" id="te-ren">Rename</button>':"")+"</div>"+
+      '<div class="note">'+esc(r.name)+": "+esc(r.source.name)+" · loaded "+esc(fmtT(r.source.at))+" by "+esc(r.source.by)+" · years "+esc(r.years.join(", "))+" · "+r.areas.length+" service areas"+(free?" (labor rates are the same in every area, so jobs don't need a service area)":" (labor rates differ by area, so each job picks a service area)")+" · used by "+used+" job"+(used===1?"":"s")+". Labor and equipment bill at the rates for the year of each work date.</div>"+
+      '<section class="details" style="display:block"><fieldset style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))"><legend>Set by billing for '+esc(r.name)+"</legend>"+
+      '<label class="f" for="te-pd">Per diem (USD per person per day)<input id="te-pd" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r.perDiem!=null?r.perDiem:"")+'"'+(ed?"":" disabled")+"></label>"+
+      '<label class="f" for="te-lo">Lodging (USD per person per night)<input id="te-lo" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r.lodging!=null?r.lodging:"")+'"'+(ed?"":" disabled")+"></label>"+
+      '<label class="f" for="te-mk">Subcontractor markup (%)<input id="te-mk" type="number" step="0.01" min="0" inputmode="decimal" value="'+esc(r.subMarkup!=null?r.subMarkup:"")+'"'+(ed?"":" disabled")+"></label>"+
+      (ed?'<div class="f" style="justify-content:flex-end"><button class="btn primary" type="button" id="te-save">Save</button></div>':"")+
+      '</fieldset><p class="sub" style="margin:6px 0 0">These aren\'t on the Eversource rate sheet. Blank = not set; a timesheet that needs one can\'t be invoiced until it\'s entered. The rate sheet says combined subcontractor markup can\'t exceed 12%.</p></section>'+
+      '<div class="filters" style="margin-top:12px">'+(free?"":'<select id="te-area" aria-label="Service area">'+r.areas.map(a=>"<option"+(a===st.area?" selected":"")+">"+esc(a)+"</option>").join("")+"</select>")+'<select id="te-year" aria-label="Rate year">'+r.years.map(y=>"<option"+(+y===+st.year?" selected":"")+">"+y+"</option>").join("")+'</select></div><div id="te-tbls"></div>'
+     :'<div class="empty"><b>No T&amp;E pricing yet</b>Use Load new T&amp;E pricing and pick the Eversource MSA Exhibit B rate sheet (.xlsx).</div>');
+  const on=(i,fn)=>{const b=document.getElementById(i);if(b)b.onclick=fn;};
+  on("te-new",()=>openTeRateUpload(null));on("te-upd",()=>openTeRateUpload(r.id));
+  on("te-ren",()=>{const n=prompt("Name for this T&E pricing",r.name);if(n==null||!n.trim()||n.trim()===r.name)return;if(sets.some(x=>x.id!==r.id&&x.name.toLowerCase()===n.trim().toLowerCase())){toast("Another pricing set already has that name.");return;}if(!canSave())return;
+    commitIndex(ix=>{migrateTe(ix);const t=ix.teRateSets.find(x=>x.id===r.id);if(t)t.name=n.trim();},"Workflow: rename T&E pricing").then(()=>{refresh();toast("Renamed");}).catch(x=>toast(errText(x),8000));});
+  if(!r)return;
+  document.getElementById("te-set").onchange=e=>{st.set=e.target.value;refresh();};
   const sv=document.getElementById("te-save");if(sv)sv.onclick=e=>{const g=id=>{const v=document.getElementById(id).value.trim();if(v==="")return null;const n=Number(v);if(!isFinite(n)||n<0)throw new Error("Rates must be numbers of 0 or more.");return n;};
     let pd,lo,mk;try{pd=g("te-pd");lo=g("te-lo");mk=g("te-mk");}catch(x){toast(x.message);return;}
     if(mk!=null&&mk>12&&!confirm("A "+mk+"% markup is above the 12% cap stated on the rate sheet. Save anyway?"))return;
-    if(!canSave())return;const b=e.target;b.disabled=true;b.textContent="Saving…";(async()=>{await commitIndex(ix=>{if(!ix.teRates)throw new Error("Load the rate sheet first.");const o=ix.teRates;const ch=[];
+    if(!canSave())return;const b=e.target;b.disabled=true;b.textContent="Saving…";
+    commitIndex(ix=>{migrateTe(ix);const o=ix.teRateSets.find(x=>x.id===r.id);if(!o)throw new Error("This pricing set was removed by someone else.");const ch=[];
       [["perDiem",pd,"per diem"],["lodging",lo,"lodging"],["subMarkup",mk,"sub markup"]].forEach(([k,v,l])=>{if((o[k]==null?null:o[k])!==v)ch.push(l+" "+(o[k]==null?"blank":o[k])+" → "+(v==null?"blank":v));o[k]=v;});
-      (ix.rateLog=ix.rateLog||[]).push({t:new Date().toISOString(),by:S.me.name,name:"T&E: "+(ch.join("; ")||"no change")});},"Workflow: T&E per diem, lodging, markup");refresh();toast("T&E rates saved");})().catch(x=>{toast(errText(x),8000);b.disabled=false;b.textContent="Save";});};
-  if(!r)return;
-  const a=document.getElementById("te-area"),y=document.getElementById("te-year");a.onchange=()=>{st.area=a.value;draw();};y.onchange=()=>{st.year=+y.value;draw();};
-  function draw(){const lab=r.labor.filter(x=>x.area===st.area&&x.year===+st.year);const eq=r.equipment.filter(x=>x.year===+st.year);
-    document.getElementById("te-tbls").innerHTML='<h2 class="sec">Labor — '+esc(st.area)+" · "+esc(st.year)+' <span class="sub">(USD per hour)</span></h2><div class="tablebox"><table class="static"><thead><tr><th>Group</th><th>Classification</th><th>Union</th><th class="num">Straight time</th><th class="num">Overtime</th><th class="num">Double time</th></tr></thead><tbody>'+
-      lab.map(x=>"<tr><td>"+esc(x.group)+'</td><td class="wrapc"><b>'+esc(x.role)+"</b></td><td>"+esc(x.union)+'</td><td class="mono num">'+money(x.st)+'</td><td class="mono num">'+(x.ot==null?'<span class="sub">—</span>':money(x.ot))+'</td><td class="mono num">'+(x.dt==null?'<span class="sub">—</span>':money(x.dt))+"</td></tr>").join("")+"</tbody></table></div>"+
+      (ix.rateLog=ix.rateLog||[]).push({t:new Date().toISOString(),by:S.me.name,name:o.name+": "+(ch.join("; ")||"no change")});},"Workflow: T&E per diem, lodging, markup")
+      .then(()=>{refresh();toast("Saved for "+r.name);}).catch(x=>{toast(errText(x),8000);b.disabled=false;b.textContent="Save";});};
+  const a=document.getElementById("te-area"),y=document.getElementById("te-year");if(a)a.onchange=()=>{st.area=a.value;draw();};y.onchange=()=>{st.year=+y.value;draw();};
+  function draw(){const area=free?r.areas[0]:st.area;const lab=r.labor.filter(x=>x.area===area&&x.year===+st.year);const eq=r.equipment.filter(x=>x.year===+st.year);
+    document.getElementById("te-tbls").innerHTML='<h2 class="sec">Labor — '+(free?"all service areas":esc(area))+" · "+esc(st.year)+' <span class="sub">(USD per hour)</span></h2><div class="tablebox"><table class="static"><thead><tr><th>Group</th><th>Classification</th>'+(free?"":"<th>Union</th>")+'<th class="num">Straight time</th><th class="num">Overtime</th><th class="num">Double time</th></tr></thead><tbody>'+
+      lab.map(x=>"<tr><td>"+esc(x.group)+'</td><td class="wrapc"><b>'+esc(x.role)+"</b></td>"+(free?"":"<td>"+esc(x.union)+"</td>")+'<td class="mono num">'+money(x.st)+'</td><td class="mono num">'+(x.ot==null?'<span class="sub">—</span>':money(x.ot))+'</td><td class="mono num">'+(x.dt==null?'<span class="sub">—</span>':money(x.dt))+"</td></tr>").join("")+"</tbody></table></div>"+
       (r.unpriced&&r.unpriced.length?'<p class="sub">Not priced on the rate sheet (can\'t be billed): '+esc(r.unpriced.join(", "))+"</p>":"")+
       '<h2 class="sec">Equipment — '+esc(st.year)+' <span class="sub">(USD, all service areas)</span></h2><div class="tablebox"><table class="static"><thead><tr><th>Category</th><th>Equipment</th><th class="num">Hourly</th><th class="num">Daily</th><th class="num">Monthly</th></tr></thead><tbody>'+
       eq.map(x=>"<tr><td>"+esc(x.category)+'</td><td class="wrapc"><b>'+esc(x.item)+'</b></td><td class="mono num">'+money(x.hourly)+'</td><td class="mono num">'+money(x.daily)+'</td><td class="mono num">'+money(x.monthly)+"</td></tr>").join("")+"</tbody></table></div>"+
       (r.equipUnpriced&&r.equipUnpriced.length?'<p class="sub">'+r.equipUnpriced.length+" equipment lines on the rate sheet have no price and can't be billed.</p>":"");}
   draw();}
-function openTeRateUpload(){
-  if(!canRates()||!canSave())return;
-  const m=modal("Load T&E rate sheet",'<p class="sub" style="margin:0">Choose the Eversource MSA Exhibit B rate sheet (.xlsx) with the Labor Pricing and Equipment Pricing tabs. The app shows what it read and every rate change before saving.</p><label class="f" for="tr-file">Rate sheet<input type="file" id="tr-file" accept=".xlsx"></label><div id="tr-prev"></div>',
-    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="tr-save" disabled>Save T&amp;E rates</button>',"wide");
+/* one-time move of a single loaded rate sheet (ix.teRates) into the list of pricing sets */
+function migrateTe(ix){if(!ix.teRateSets)ix.teRateSets=[];if(ix.teRates){const o=ix.teRates;ix.teRateSets.push(Object.assign({id:newId("tp-"),name:teSetName(o.years)},o));delete ix.teRates;}}
+const teSetName=years=>(years&&years.length?(years[0]===years[years.length-1]?years[0]:years[0]+"–"+years[years.length-1])+" ":"")+"T&E pricing";
+function openTeRateUpload(replaceId){
+  if(!canRates()||!canSave())return;const target=replaceId?teSetById(replaceId):null;
+  const m=modal(target?"Update "+target.name:"Load new T&E pricing",'<p class="sub" style="margin:0">Choose the Eversource MSA Exhibit B rate sheet (.xlsx) with the Labor Pricing and Equipment Pricing tabs. '+(target?"The new rates replace this set's rates; jobs on it pick up the new rates for timesheets not yet invoiced. Per diem, lodging and markup stay as they are.":"It's added as a new pricing set that jobs can pick. Existing jobs keep the pricing they're on.")+'</p><label class="f" for="tr-file">Rate sheet<input type="file" id="tr-file" accept=".xlsx"></label>'+(target?"":'<label class="f" for="tr-name">Name<input id="tr-name" placeholder="e.g. 2026–2028 T&amp;E pricing"></label>')+'<div id="tr-prev"></div>',
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="tr-save" disabled>'+(target?"Update pricing":"Save T&amp;E pricing")+"</button>","wide");
   let parsed=null,name="";
   m.querySelector("#tr-file").onchange=async ev=>{const f=ev.target.files[0];if(!f)return;name=f.name;const pv=m.querySelector("#tr-prev");pv.innerHTML='<p class="sub">Reading…</p>';m.querySelector("#tr-save").disabled=true;
     try{parsed=await parseTeRateBook(await TMPL.tables(await f.arrayBuffer()));}catch(e){parsed=null;pv.innerHTML='<div class="err">'+esc(errText(e))+"</div>";return;}
-    const old=teRates();const chg=[];
+    const nm=m.querySelector("#tr-name");if(nm&&!nm.value.trim())nm.value=teSetName(parsed.years);
+    const old=target;const chg=[];
     if(old){const k=x=>x.area+"|"+x.year+"|"+x.role;const om=new Map(old.labor.map(x=>[k(x),x]));parsed.labor.forEach(x=>{const o=om.get(k(x));if(!o)chg.push([x.role+" · "+x.area+" · "+x.year,"new"]);else TE_HRS.forEach(([h,ab])=>{if(o[h]!==x[h])chg.push([x.role+" · "+x.area+" · "+x.year+" · "+ab,money(o[h])+" → "+money(x[h])]);});});
       const ke=x=>x.year+"|"+x.item;const oe=new Map(old.equipment.map(x=>[ke(x),x]));parsed.equipment.forEach(x=>{const o=oe.get(ke(x));if(!o)chg.push([x.item+" · "+x.year,"new"]);else TE_BASIS.forEach(([,,f])=>{if(o[f]!==x[f])chg.push([x.item+" · "+x.year+" · "+f,money(o[f])+" → "+money(x[f])]);});});}
     const odd=parsed.labor.filter(x=>x.ot!=null&&Math.abs(x.ot-x.st*1.5)>x.st*0.05);
-    pv.innerHTML='<div class="okbox">'+parsed.areas.length+" service areas ("+esc(parsed.areas.join(", "))+") · years "+esc(parsed.years.join(", "))+" · "+parsed.labor.length+" labor rates · "+parsed.equipment.length+" equipment rates</div>"+
+    pv.innerHTML='<div class="okbox">'+parsed.areas.length+" service areas ("+esc(parsed.areas.join(", "))+") · years "+esc(parsed.years.join(", "))+" · "+parsed.labor.length+" labor rates · "+parsed.equipment.length+" equipment rates"+(teAreaFree(parsed)?" · labor rates are the same in every area":"")+"</div>"+
       (odd.length?'<div class="banner"><b>Check:</b> overtime isn\'t about 1.5× straight time for '+esc([...new Set(odd.map(x=>x.role+" "+x.year+" (ST "+x.st+", OT "+x.ot+")"))].join("; "))+". They load as written.</div>":"")+
       (parsed.unpriced.length?'<p class="sub" style="margin:6px 0">Labor with no price (can\'t be billed): '+esc(parsed.unpriced.join(", "))+"</p>":"")+
-      (old?'<div class="sec-h" style="margin:10px 0 4px">Changes vs. current T&amp;E rates ('+chg.length+")</div>"+(chg.length?'<div class="tablebox" style="max-height:240px;overflow:auto"><table class="static"><tbody>'+chg.slice(0,400).map(c=>"<tr><td>"+esc(c[0])+'</td><td class="mono">'+esc(c[1])+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No rate changes.</p>'):"");
+      (old?'<div class="sec-h" style="margin:10px 0 4px">Changes vs. current rates ('+chg.length+")</div>"+(chg.length?'<div class="tablebox" style="max-height:240px;overflow:auto"><table class="static"><tbody>'+chg.slice(0,400).map(c=>"<tr><td>"+esc(c[0])+'</td><td class="mono">'+esc(c[1])+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No rate changes.</p>'):"");
     m.querySelector("#tr-save").disabled=false;};
   m.querySelector("#tr-save").onclick=e=>busyRun(e.target,m,async()=>{if(!parsed)return;
-    await commitIndex(ix=>{const o=ix.teRates||{};ix.teRates={areas:parsed.areas,years:parsed.years,labor:parsed.labor,equipment:parsed.equipment,unpriced:parsed.unpriced,equipUnpriced:parsed.equipUnpriced,
-      perDiem:o.perDiem==null?null:o.perDiem,lodging:o.lodging==null?null:o.lodging,subMarkup:o.subMarkup==null?null:o.subMarkup,source:{name,at:new Date().toISOString(),by:S.me.name}};
-      (ix.rateLog=ix.rateLog||[]).push({t:new Date().toISOString(),by:S.me.name,name:"T&E rate sheet: "+name});},"Workflow: load T&E rate sheet");
-    closeOverlay();refresh();toast("T&E rates saved");});}
+    const nm=m.querySelector("#tr-name");const nn=nm?nm.value.trim():"";if(!target&&!nn)throw new Error("Give this pricing a name.");
+    if(!target&&teSets().some(x=>x.name.toLowerCase()===nn.toLowerCase()))throw new Error("A pricing set named "+nn+" already exists. Use Update on it, or pick another name.");
+    const rates={areas:parsed.areas,years:parsed.years,labor:parsed.labor,equipment:parsed.equipment,unpriced:parsed.unpriced,equipUnpriced:parsed.equipUnpriced,source:{name,at:new Date().toISOString(),by:S.me.name}};
+    let newId_="";
+    await commitIndex(ix=>{migrateTe(ix);
+      if(target){const t=ix.teRateSets.find(x=>x.id===target.id);if(!t)throw new Error("This pricing set was removed by someone else.");Object.assign(t,rates);newId_=t.id;}
+      else{const t=Object.assign({id:newId("tp-"),name:nn,perDiem:null,lodging:null,subMarkup:null},rates);ix.teRateSets.push(t);newId_=t.id;}
+      (ix.rateLog=ix.rateLog||[]).push({t:new Date().toISOString(),by:S.me.name,name:(target?"Updated ":"Loaded ")+(target?target.name:nn)+" from "+name});},"Workflow: T&E pricing");
+    (S.teView=S.teView||{}).set=newId_;closeOverlay();refresh();toast(target?"Pricing updated":"T&E pricing saved: "+nn);});}
 
 /* ---------- company crew roster ---------- */
 function openRoster(){
@@ -2103,7 +2133,7 @@ function openRoster(){
     closeOverlay();refresh();toast("Roster saved: "+keep.length+" people");});}
 function roleSelect(val,roles,attrs){const rs=roles||teRoleNames();const groups=[...new Set(rs.map(r=>r.group))];
   return'<select'+(attrs||"")+'><option value="">Select…</option>'+groups.map(g=>'<optgroup label="'+esc(g)+'">'+rs.filter(r=>r.group===g).map(r=>"<option"+(r.role===val?" selected":"")+">"+esc(r.role)+"</option>").join("")+"</optgroup>").join("")+(val&&!rs.some(r=>r.role===val)?'<option selected>'+esc(val)+"</option>":"")+"</select>";}
-function equipSelect(val){const es=teEquipNames();const cats=[...new Set(es.map(e=>e.category))];
+function equipSelect(val,set){const es=teEquipNames(set||undefined);const cats=[...new Set(es.map(e=>e.category))];
   return'<select data-k="item"><option value="">Select equipment…</option>'+cats.map(c=>'<optgroup label="'+esc(c||"Other")+'">'+es.filter(e=>e.category===c).map(e=>"<option"+(e.item===val?" selected":"")+">"+esc(e.item)+"</option>").join("")+"</optgroup>").join("")+(val&&!es.some(e=>e.item===val)?'<option selected>'+esc(val)+"</option>":"")+"</select>";}
 
 /* ---------- T&E daily timesheet form ---------- */
@@ -2115,7 +2145,7 @@ function openTeForm(id,presetJob){
   const src=id?S.docs.get(id):null;
   const act=jobs().filter(j=>isTeJob(j)&&(!j.archived||(src&&j.id===src.jobId)));
   if(!act.length){toast(can.setup()?"Set up a T&E job first: Add Job → Billing type: T&E.":"No T&E jobs are set up yet. Ask billing to add the job.",7000);return;}
-  if(!teRates()){toast(can.setup()?"Load the T&E rate sheet first (Rates tab).":"T&E rates haven't been loaded yet. Ask billing.",7000);return;}
+  if(!teSets().length){toast(can.setup()?"Load the T&E pricing first (Rates tab).":"T&E pricing hasn't been loaded yet. Ask billing.",7000);return;}
   let d=src?JSON.parse(JSON.stringify(src)):teBlank(presetJob&&act.some(j=>j.id===presetJob)?presetJob:(act.length===1?act[0].id:""));
   d.labor=d.labor||[];d.equip=d.equip||[];d.subs=d.subs||[];
   const showSubs=can.seePrice();let scanFile=null;
@@ -2123,7 +2153,7 @@ function openTeForm(id,presetJob){
     '<label class="f" for="tf-date">Date<input type="date" id="tf-date" value="'+esc(d.workDate)+'"></label>'+
     '<label class="f" for="tf-crew">Crew lead<input id="tf-crew" value="'+esc(d.crew)+'"></label>'+
     '<label class="f" for="tf-wo">Work order #<input id="tf-wo" value="'+esc(d.wo)+'"></label>'+
-    '<label class="f wide" for="tf-job">Job<select id="tf-job"><option value="">Select a T&amp;E job…</option>'+act.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===d.jobId?" selected":"")+">"+esc(j.name)+(j.teArea?" — "+esc(j.teArea):"")+"</option>").join("")+"</select></label></fieldset>"+
+    '<label class="f wide" for="tf-job">Job<select id="tf-job"><option value="">Select a T&amp;E job…</option>'+act.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===d.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select></label></fieldset>"+
     '<div id="tf-pre"></div>'+
     '<div><div class="sec-h">Crew <span class="sub" id="tf-hrs"></span></div><p class="sub" style="margin:-4px 0 8px">One row per person: classification and hours by type. Tick per diem and lodging where they apply.</p><div id="tf-lab" class="te-rows"></div><div class="row-inline" style="margin-top:8px"><button class="btn" type="button" id="tf-add-l">+ Add person</button><button class="btn" type="button" id="tf-fill8">Set everyone to 8 ST</button></div></div>'+
     '<div><div class="sec-h">Equipment</div><p class="sub" style="margin:-4px 0 8px">Bill each piece by hours, days or months.</p><div id="tf-eq" class="te-rows"></div><button class="btn" type="button" id="tf-add-e" style="margin-top:8px">+ Add equipment</button></div>'+
@@ -2137,9 +2167,9 @@ function openTeForm(id,presetJob){
   function pre(){const p=m.querySelector("#tf-pre");p.innerHTML=!id&&d.prefill?'<div class="note" style="margin:0">Pre-filled from '+esc(d.prefill.no)+" ("+esc(fmtD(d.prefill.date))+"). Check names, hours and equipment for today.</div>":"";}
   function tot(){const h=m.querySelector("#tf-hrs");h.textContent=d.labor.length?"· "+d.labor.length+" people · "+fmtN(teHours(d))+" hrs":"";
     const t=m.querySelector("#tf-tot");if(!t)return;const pr=priceTe(Object.assign({},d,{jobId:jsel.value,workDate:dsel.value,labor:d.labor.filter(L=>L.role),equip:d.equip.filter(E=>E.item)}));
-    t.innerHTML=pr.total!=null?"Day total: <b>"+money(pr.total)+"</b> <span class=\"sub\">(Calculated from the "+esc(pr.year)+" "+esc(pr.area)+" rates)</span>":'<span class="sub">Day total shows once every line can be priced'+(pr.errs.length?": "+esc(pr.errs.slice(0,3).join("; ")):"")+"</span>";}
+    t.innerHTML=pr.total!=null?"Day total: <b>"+money(pr.total)+"</b> <span class=\"sub\">(Calculated from "+esc(pr.label)+")</span>":'<span class="sub">Day total shows once every line can be priced'+(pr.errs.length?": "+esc(pr.errs.slice(0,3).join("; ")):"")+"</span>";}
   function drawLab(){const box=m.querySelector("#tf-lab");
-    box.innerHTML=(d.labor.length?d.labor.map((L,i)=>'<div class="te-row te-lab" data-i="'+i+'"><label class="f nm">Name<input data-k="name" list="tf-people" autocomplete="off" value="'+esc(L.name)+'"></label><label class="f cl">Classification'+roleSelect(L.role,null,' data-k="role"')+"</label>"+
+    box.innerHTML=(d.labor.length?d.labor.map((L,i)=>'<div class="te-row te-lab" data-i="'+i+'"><label class="f nm">Name<input data-k="name" list="tf-people" autocomplete="off" value="'+esc(L.name)+'"></label><label class="f cl">Classification'+roleSelect(L.role,teRoleNames(teJobSet(jobById(jsel.value))||undefined),' data-k="role"')+"</label>"+
       TE_HRS.map(([k,ab,lab])=>'<label class="f hr" title="'+lab+'">'+ab+'<input data-k="'+k+'" type="number" inputmode="decimal" step="0.25" min="0" max="24" value="'+esc(L[k]==null?"":L[k])+'"></label>').join("")+
       '<label class="te-chk"><input type="checkbox" data-k="pd"'+(L.pd?" checked":"")+'>Per diem</label><label class="te-chk"><input type="checkbox" data-k="lodge"'+(L.lodge?" checked":"")+'>Lodging</label><button class="btn sm danger" type="button" data-rm aria-label="Remove '+esc(L.name||"person")+'">✕</button></div>').join(""):'<p class="sub" style="margin:0">No one added yet.</p>')+dl;
     box.querySelectorAll(".te-row").forEach(row=>{const L=d.labor[+row.dataset.i];
@@ -2147,7 +2177,7 @@ function openTeForm(id,presetJob){
         if(k==="name"){const p=rosterList.find(x=>x.name.toLowerCase()===inp.value.trim().toLowerCase());L.pid=p?p.id:"";if(p&&p.role&&!L.role){L.role=p.role;row.querySelector("select[data-k=role]").value=p.role;}}tot();};});
       row.querySelector("[data-rm]").onclick=()=>{d.labor.splice(+row.dataset.i,1);drawLab();};});tot();}
   function drawEq(){const box=m.querySelector("#tf-eq");
-    box.innerHTML=d.equip.length?d.equip.map((E,i)=>'<div class="te-row te-eq" data-i="'+i+'"><label class="f it">Equipment'+equipSelect(E.item)+'</label><label class="f">Bill by<select data-k="basis">'+TE_BASIS.map(([k,l])=>'<option value="'+k+'"'+((E.basis||"hour")===k?" selected":"")+">"+l+"</option>").join("")+'</select></label><label class="f hr">Qty<input data-k="qty" type="number" inputmode="decimal" step="0.25" min="0" value="'+esc(E.qty==null?"":E.qty)+'"></label><button class="btn sm danger" type="button" data-rm aria-label="Remove equipment">✕</button></div>').join(""):'<p class="sub" style="margin:0">No equipment added.</p>';
+    box.innerHTML=d.equip.length?d.equip.map((E,i)=>'<div class="te-row te-eq" data-i="'+i+'"><label class="f it">Equipment'+equipSelect(E.item,teJobSet(jobById(jsel.value)))+'</label><label class="f">Bill by<select data-k="basis">'+TE_BASIS.map(([k,l])=>'<option value="'+k+'"'+((E.basis||"hour")===k?" selected":"")+">"+l+"</option>").join("")+'</select></label><label class="f hr">Qty<input data-k="qty" type="number" inputmode="decimal" step="0.25" min="0" value="'+esc(E.qty==null?"":E.qty)+'"></label><button class="btn sm danger" type="button" data-rm aria-label="Remove equipment">✕</button></div>').join(""):'<p class="sub" style="margin:0">No equipment added.</p>';
     box.querySelectorAll(".te-row").forEach(row=>{const E=d.equip[+row.dataset.i];row.querySelectorAll("[data-k]").forEach(inp=>{inp[inp.tagName==="SELECT"?"onchange":"oninput"]=()=>{E[inp.dataset.k]=inp.value;tot();};});row.querySelector("[data-rm]").onclick=()=>{d.equip.splice(+row.dataset.i,1);drawEq();};});tot();}
   function drawSub(){const box=m.querySelector("#tf-sub");if(!box)return;
     box.innerHTML=d.subs.length?d.subs.map((s,i)=>'<div class="te-row te-sub" data-i="'+i+'"><label class="f">Subcontractor<input data-k="vendor" value="'+esc(s.vendor)+'"></label><label class="f ds">Description<input data-k="desc" value="'+esc(s.desc)+'"></label><label class="f">Cost (USD)<input data-k="amount" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(s.amount==null?"":s.amount)+'"></label><button class="btn sm danger" type="button" data-rm aria-label="Remove subcontractor">✕</button></div>').join(""):'<p class="sub" style="margin:0">None.</p>';
@@ -2193,7 +2223,7 @@ function openTeForm(id,presetJob){
 /* ---------- T&E timesheet view ---------- */
 function teDetailsHtml(d){const j=jobById(d.jobId);
   return dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("Work order #",esc(d.wo))+
-    dl("Service area",j&&j.teArea?esc(j.teArea):'<span class="late">Not set on the job</span>')+dl("Rate year",esc(yearOf(d.workDate)||""))+dl("Crew",esc(teSummary(d)))+
+    dl("T&E pricing",teJobSet(j)?esc(teJobSet(j).name+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+j.teArea:"")):'<span class="late">Not set on the job</span>')+dl("Rate year",esc(yearOf(d.workDate)||""))+dl("Crew",esc(teSummary(d)))+
     dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
     (d.scan?dl("Paper timesheet",'<button class="btn sm" type="button" id="a-scan">'+esc(d.scan.name)+"</button>"):"")+(d.notes?dl("Notes",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"");}
 function teBodyHtml(d){
@@ -2208,7 +2238,7 @@ function teBodyHtml(d){
   const other=priced&&rest.length?'<h2 class="sec">Per diem, lodging &amp; subcontractors</h2><div class="tablebox"><table class="static"><thead><tr><th>Item</th><th>Type</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+
     rest.map(l=>"<tr><td>"+esc(l.item)+"</td><td>"+esc(l.type)+'</td><td class="mono num">'+fmtN(l.qty)+'</td><td class="mono num">'+(l.rate==null?'<span class="late">Not set</span>':money(l.rate))+'</td><td class="mono num">'+(l.ext==null?"—":money(l.ext))+"</td></tr>").join("")+"</tbody></table></div>":"";
   return(priced&&pr.errs.length?'<div class="banner bad"><b>Pricing check:</b> '+esc(pr.errs.join(" · "))+"</div>":"")+lab+eq+other+
-    (priced?'<div class="okbox" style="margin-top:10px">Day total: <b class="mono">'+(pr.total==null?"Incomplete":money(pr.total))+'</b> <span class="sub">Calculated: Σ hours / qty × '+esc(pr.year||"")+" "+esc(pr.area||"")+" rate, USD</span></div>":"");}
+    (priced?'<div class="okbox" style="margin-top:10px">Day total: <b class="mono">'+(pr.total==null?"Incomplete":money(pr.total))+'</b> <span class="sub">Calculated: Σ hours / qty × rate ('+esc(pr.label)+"), USD</span></div>":"");}
 
 /* ---------- T&E job page ---------- */
 function renderTeJob(j){
@@ -2217,11 +2247,10 @@ function renderTeJob(j){
   const by=st=>ss.filter(s=>s.status===st).length;const ok=ss.filter(isReady).length,inv=by(ST.INV);
   let appr=0,apprOk=true;ss.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceTe(s).total;if(t==null)apprOk=false;else appr+=t;});
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
-    '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(j.teArea?"<span>"+esc(j.teArea)+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+'</div></div><div class="acts">'+
+    '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+esc(j.teArea):"")+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+'</div></div><div class="acts">'+
       (can.newSheet()&&!j.archived?'<button class="btn primary" type="button" id="tj-new">+ New T&amp;E timesheet</button>':"")+'<button class="btn" type="button" id="tj-print">Print blank timesheet</button>'+
       (can.setup()?'<button class="btn" type="button" id="tj-roster">Crew roster</button><button class="btn" type="button" id="tj-edit">Edit job</button>':"")+(role()!=="crew"?'<button class="btn" type="button" id="tj-csv">Export CSV</button>':"")+"</div></section>"+
-    (!j.teArea&&role()!=="crew"?'<div class="banner">No T&amp;E service area is set on this job, so its timesheets can\'t be priced. Set it with <b>Edit job</b>.</div>':"")+
-    (!teRates()&&role()!=="crew"?'<div class="banner">The T&amp;E rate sheet hasn\'t been loaded yet (Rates tab).</div>':"")+
+    (!teJobSet(j)&&role()!=="crew"?'<div class="banner">No T&amp;E pricing is picked for this job, so its timesheets can\'t be priced. Pick it with <b>Edit job</b>.</div>':(teJobSet(j)&&!teJobArea(j,teJobSet(j))&&role()!=="crew"?'<div class="banner">'+esc(teJobSet(j).name)+' has different labor rates by service area. Pick the service area with <b>Edit job</b>.</div>':""))+
     (role()!=="crew"&&((j.packages||[]).length||can.setup())?'<div class="pkgbar"><b>Job package</b>'+(j.packages||[]).map((pk,i)=>'<button class="btn sm" type="button" data-pk="'+i+'">'+esc(pk.name)+' <span class="sub">'+fmtSize(pk.size)+"</span></button>").join("")+((j.packages||[]).length?"":'<span class="sub">None uploaded</span>')+(can.setup()?'<button class="btn sm primary" type="button" id="tj-pkg">Upload package</button>':"")+"</div>":"")+
     '<section class="tiles">'+tile("Timesheets",ss.length,ss.length?"Latest "+fmtD(ss.map(s=>s.workDate).filter(Boolean).sort().pop()||""):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"Timesheets to review",by(ST.SUB)>0)+tile("Ready to bill",ok,"Signed by the CM",false)+tile("Invoiced",inv,"On invoices",false)+(can.seePrice()?tile("Approved $",ok+inv?(apprOk?money(appr):"Check"):"$0.00","Ready + invoiced",false):"")+"</section>"+
     '<div class="subtabs" role="tablist"><button role="tab" type="button" id="t-sheets" aria-selected="'+(tab==="sheets")+'">Timesheets ('+ss.length+")</button>"+(canGfSign()?'<button role="tab" type="button" id="t-gf" aria-selected="'+(tab==="gf")+'">CM sign-off ('+gfList.length+")</button>":"")+'</div><div id="jbody"></div>';
@@ -2248,7 +2277,7 @@ function printTeSheet(j){
   const lab=Array.from({length:NL},(_,i)=>{const p=people[i];return"<tr><td>"+esc(p?p.name:"")+"</td><td>"+esc(p?p.role:"")+'</td><td class="q"></td><td class="q"></td><td class="q"></td><td class="q"></td><td class="q"></td></tr>';}).join("");
   const eqr=Array.from({length:NE},(_,i)=>{const e=eq[i];const b=e?(TE_BASIS.find(x=>x[0]===e.basis)||TE_BASIS[0])[1]:"";return"<tr><td>"+esc(e?e.item:"")+'</td><td class="q2">'+esc(b?"☐ Hrs ☐ Days ☐ Mo":"☐ Hrs ☐ Days ☐ Mo")+'</td><td class="q"></td></tr>';}).join("");
   const p=document.getElementById("print");
-  p.innerHTML='<div class="us"><section class="us-page te-page"><div class="us-top"><div><h1>T&amp;E DAILY TIMESHEET</h1><div class="sub" style="font-size:11px;margin-top:4px">Time &amp; equipment · one sheet per crew per day</div></div><div class="us-job"><img src="pg-logo.jpg" alt="P&amp;G Power Co."><b>'+esc(j.name)+"</b>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.teArea?"<span>"+esc(j.teArea)+"</span>":"")+"</div></div>"+
+  p.innerHTML='<div class="us"><section class="us-page te-page"><div class="us-top"><div><h1>T&amp;E DAILY TIMESHEET</h1><div class="sub" style="font-size:11px;margin-top:4px">Time &amp; equipment · one sheet per crew per day</div></div><div class="us-job"><img src="pg-logo.jpg" alt="P&amp;G Power Co."><b>'+esc(j.name)+"</b>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+"</span>":"")+"</div></div>"+
     '<div class="us-row">'+box("DATE","","w1")+box("CREW LEAD",prev?prev.crew:"","w2")+box("WORK ORDER #",prev?prev.wo:j.wo,"w1")+box("WEATHER / START–END TIME","","w2")+"</div>"+
     '<table class="us-sec te-sec" style="margin-top:10px"><thead><tr><th>NAME</th><th>CLASSIFICATION</th><th class="q">ST HRS</th><th class="q">OT HRS</th><th class="q">DT HRS</th><th class="q">PER DIEM</th><th class="q">LODGING</th></tr></thead><tbody>'+lab+"</tbody></table>"+
     '<table class="us-sec te-sec"><thead><tr><th>EQUIPMENT</th><th class="q2">BILL BY</th><th class="q">QTY</th></tr></thead><tbody>'+eqr+"</tbody></table>"+
@@ -2264,7 +2293,7 @@ function printTeSheet(j){
 const TE_CATS=["Labor","Equipment","Per diem","Lodging","Subcontractor"];
 function buildTeInvoice(sel){
   const errs=[];const days=sel.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no))).map(s=>{const pr=priceTe(s);if(s.hold&&s.hold.on)errs.push(s.no+" is on hold");pr.errs.forEach(e=>errs.push(s.no+": "+e));
-    return{sheetId:s.id,no:s.no,date:s.workDate,crew:s.crew,wo:s.wo||"",area:pr.area,year:pr.year,gfBy:s.gfBy||"",gfAt:s.gfAt||"",lines:pr.lines,total:pr.lines.reduce((a,l)=>a+(l.ext||0),0)};});
+    return{sheetId:s.id,no:s.no,date:s.workDate,crew:s.crew,wo:s.wo||"",area:pr.area,year:pr.year,label:pr.label,gfBy:s.gfBy||"",gfAt:s.gfAt||"",lines:pr.lines,total:pr.lines.reduce((a,l)=>a+(l.ext||0),0)};});
   const summary=TE_CATS.map(c=>({cat:c,amount:days.reduce((a,d)=>a+d.lines.filter(l=>l.cat===c).reduce((x,l)=>x+(l.ext||0),0),0)})).filter(x=>x.amount);
   const lab=new Map();days.forEach(d=>d.lines.filter(l=>l.cat==="Labor").forEach(l=>{const k=l.item+"|"+l.type+"|"+l.rate;const e=lab.get(k)||{item:l.item,type:l.type,rate:l.rate,qty:0,ext:0};e.qty+=l.qty;e.ext+=l.ext||0;lab.set(k,e);}));
   const eqm=new Map();days.forEach(d=>d.lines.filter(l=>l.cat==="Equipment").forEach(l=>{const k=l.item+"|"+l.type+"|"+l.rate;const e=eqm.get(k)||{item:l.item,type:l.type,rate:l.rate,qty:0,ext:0};e.qty+=l.qty;e.ext+=l.ext||0;eqm.set(k,e);}));
@@ -2280,7 +2309,7 @@ function teInvCoverHtml(i,pv){
     (i.labor.length?(pv?'<h2 class="pv-h2" style="margin-top:14px">Labor by classification</h2>':'<h2 class="sec">Labor by classification</h2>')+'<table class="'+T+'"><thead><tr><th>Classification</th><th>Hour type</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+i.labor.map(x=>"<tr><td>"+esc(x.item)+"</td><td>"+esc(x.type)+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+"</tbody></table>":"")+
     (i.equipment.length?(pv?'<h2 class="pv-h2" style="margin-top:14px">Equipment</h2>':'<h2 class="sec">Equipment</h2>')+'<table class="'+T+'"><thead><tr><th>Equipment</th><th>Billed by</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+i.equipment.map(x=>"<tr><td>"+esc(x.item)+"</td><td>"+esc(x.type)+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+"</tbody></table>":"");}
 function teInvDayHtml(d,pv){const n=pv?"num":"mono num";
-  return'<table class="'+(pv?"pv-lines pv-pole":"static")+'"><thead><tr><th colspan="6">'+esc(fmtD(d.date)+"  |  "+d.no+"  |  CREW LEAD "+d.crew+(d.wo?"  |  WO #"+d.wo:"")+"  |  "+d.area+" "+d.year+" RATES")+'</th></tr><tr class="subh"><td>Category</td><td>Description</td><td>Type</td><td class="num">Qty</td><td class="num">Rate</td><td class="num">Amount</td></tr></thead><tbody>'+
+  return'<table class="'+(pv?"pv-lines pv-pole":"static")+'"><thead><tr><th colspan="6">'+esc(fmtD(d.date)+"  |  "+d.no+"  |  CREW LEAD "+d.crew+(d.wo?"  |  WO #"+d.wo:"")+"  |  "+(d.label||(d.area+" "+d.year+" rates")).toUpperCase())+'</th></tr><tr class="subh"><td>Category</td><td>Description</td><td>Type</td><td class="num">Qty</td><td class="num">Rate</td><td class="num">Amount</td></tr></thead><tbody>'+
     d.lines.map(l=>"<tr><td>"+esc(l.cat)+"</td><td>"+esc(l.item+(l.who?" — "+l.who:""))+"</td><td>"+esc(l.type)+'</td><td class="'+n+'">'+fmtN(l.qty)+'</td><td class="'+n+'">'+money(l.rate)+'</td><td class="'+n+'">'+money(l.ext)+"</td></tr>").join("")+
     '</tbody><tfoot><tr><td colspan="5">'+esc(fmtD(d.date)+" DAY TOTAL")+(d.gfBy?' <span style="font-weight:400;font-size:10.5px">· CM signed: '+esc(d.gfBy)+"</span>":"")+'</td><td class="'+n+'">'+money(d.total)+"</td></tr></tfoot></table>";}
 function renderTeInvoice(i,id){
@@ -2302,7 +2331,7 @@ function renderTeInvoice(i,id){
 function printTeInvoice(i){
   const p=document.getElementById("print");
   const head='<div class="pv-head"><div><img src="pg-logo.jpg" alt="P&amp;G Power Co."><div class="pv-from">'+(i.from||[]).map(esc).join("<br>")+'</div></div><div class="pv-title"><h1>INVOICE</h1><table class="pv-meta"><tr><td>Invoice No.</td><td><b>'+esc(i.no)+"</b></td></tr><tr><td>Invoice Date</td><td>"+esc(fmtD(i.date))+"</td></tr>"+(i.terms?"<tr><td>Terms</td><td>"+esc(i.terms)+"</td></tr>":"")+"<tr><td>Bill To</td><td>"+esc(i.customer)+"</td></tr>"+(i.po?"<tr><td>PO#</td><td>"+esc(i.po)+"</td></tr>":"")+(i.period?"<tr><td>Billing Period</td><td>"+esc(i.period)+"</td></tr>":"")+'</table></div></div><div class="pv-stripe"></div>';
-  p.innerHTML='<div class="pv">'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+" — TIME &amp; EQUIPMENT BILLING SUMMARY"+(i.jobName?" · "+esc(i.jobName.toUpperCase()):"")+"</h2>"+teInvCoverHtml(i,true)+'<p class="pv-foot">Daily detail follows. Rates per the 2026–2028 Eversource T&amp;D MSA, Exhibit B.</p>'+
+  p.innerHTML='<div class="pv">'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+" — TIME &amp; EQUIPMENT BILLING SUMMARY"+(i.jobName?" · "+esc(i.jobName.toUpperCase()):"")+"</h2>"+teInvCoverHtml(i,true)+'<p class="pv-foot">Daily detail follows. Rates per '+esc([...new Set(i.days.map(d=>(d.label||"").split(" · ")[0]).filter(Boolean))].join(", ")||"the Eversource T&D MSA, Exhibit B")+'.</p>'+
     '<div class="pv-break"></div>'+head+'<h2 class="pv-h2">DAILY DETAIL</h2>'+i.days.map(d=>teInvDayHtml(d,true)).join("")+'<table class="pv-lines"><tfoot><tr><td class="num">INVOICE TOTAL (USD)</td><td class="num" style="width:140px">'+money(i.total)+"</td></tr></tfoot></table></div>";
   document.body.classList.add("printing");const prev=document.title;document.title="P&G T&E Invoice "+i.no;
   const done=()=>{document.body.classList.remove("printing");document.title=prev;window.removeEventListener("afterprint",done);};window.addEventListener("afterprint",done);setTimeout(()=>window.print(),200);}

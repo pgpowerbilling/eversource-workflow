@@ -946,20 +946,24 @@ function checkLocs(rows,existing){
     const t=L.ticket.trim().toUpperCase();if(t){if(seen.has(t))errs.push("Row "+(i+1)+": Ticket "+L.ticket+" is already on this job.");seen.add(t);}});
   return{used:used.map(L=>{const o={};Object.keys(L).forEach(k=>{if(k[0]!=="_")o[k]=String(L[k]==null?"":L[k]).trim();});return o;}),errs};}
 /* ---------- job fields (Add Job form + Edit job) ---------- */
-const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teArea","T&E service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
-const blankJob=()=>({name:"",billing:"units",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
+const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teSet","T&E pricing *","teset"],["teArea","Service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
+const blankJob=()=>({name:"",billing:"units",teSet:"",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
 function gfNames(){const p=(S.index&&S.index.profiles)||{};return Object.values(p).filter(x=>x.role==="gf").map(x=>x.name).sort();}
 function jobFieldsHtml(pre,v){
   return JOB_FIELDS.map(([k,l,t,wide])=>{const id=pre+"-"+k;const val=v[k]==null?"":v[k];
     if(t==="area")return'<label class="f" data-bill="units" for="'+id+'">'+esc(l)+areaSelect(id,val)+"</label>";
     if(t==="billing")return'<label class="f" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-billsel><option value="units"'+(val!=="te"?" selected":"")+'>Units (unit sheets)</option><option value="te"'+(val==="te"?" selected":"")+">T&amp;E (time &amp; equipment)</option></select></label>";
-    if(t==="tearea"){const ar=teRates()?teRates().areas:[];return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'"><option value="">— not set —</option>'+ar.map(a=>"<option"+(a===val?" selected":"")+">"+esc(a)+"</option>").join("")+(val&&!ar.includes(val)?"<option selected>"+esc(val)+"</option>":"")+"</select></label>";}
+    if(t==="teset"){const ss=teSets();return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-tesetsel><option value="">'+(ss.length?"Select pricing…":"None loaded yet (Rates tab)")+"</option>"+ss.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===val||(!val&&ss.length===1)?" selected":"")+">"+esc(x.name)+"</option>").join("")+"</select></label>";}
+    if(t==="tearea")return'<label class="f" data-bill="te" data-tearea for="'+id+'">'+esc(l)+'<select id="'+id+'" data-val="'+esc(val)+'"></select></label>';
     if(t==="textarea")return'<label class="f wide" for="'+id+'">'+esc(l)+'<textarea id="'+id+'">'+esc(val)+"</textarea></label>";
     if(t==="gf")return'<label class="f" for="'+id+'">'+esc(l)+'<input id="'+id+'" list="'+pre+'-gfl" value="'+esc(val)+'" autocomplete="off"><datalist id="'+pre+'-gfl">'+gfNames().map(n=>"<option>"+esc(n)+"</option>").join("")+"</datalist></label>";
     return'<label class="f'+(wide?" wide":"")+'" for="'+id+'">'+esc(l)+'<input id="'+id+'"'+(t==="date"?' type="date"':"")+' value="'+esc(val)+'"></label>';}).join("");}
-function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te")v.teArea="";return v;}
-function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const upd=()=>{root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(sel.value==="te"?"te":"units");});};sel.addEventListener("change",upd);upd();}
-function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";if(v.billing==="te"&&!v.teArea)return"Pick the T&E service area (it sets which labor rates apply).";
+function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te"){v.teSet="";v.teArea="";}else{const ts=teSetById(v.teSet);if(!ts||teAreaFree(ts))v.teArea="";}return v;}
+function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const ts=root.querySelector("[data-tesetsel]"),aw=root.querySelector("[data-tearea]");const asel=aw&&aw.querySelector("select");
+  const upd=()=>{const te=sel.value==="te";root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(te?"te":"units");});
+    if(aw){const set=ts?teSetById(ts.value):null;const need=te&&set&&!teAreaFree(set);aw.hidden=!need;if(need){const cur=asel.value||asel.dataset.val;asel.innerHTML='<option value="">— pick —</option>'+set.areas.map(a=>"<option"+(a===cur?" selected":"")+">"+esc(a)+"</option>").join("");}}};
+  sel.addEventListener("change",upd);if(ts)ts.addEventListener("change",upd);upd();}
+function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";if(v.billing==="te"){const ts=teSetById(v.teSet);if(!ts)return teSets().length?"Pick the T&E pricing for this job.":"Load the T&E pricing first (Rates tab), then pick it here.";if(!teAreaFree(ts)&&!v.teArea)return ts.name+" has different labor rates by service area. Pick the service area.";}
   if(jobs().some(j=>j.id!==selfId&&j.name.trim().toLowerCase()===v.name.toLowerCase()))return"A job named "+v.name+" already exists.";
   if(v.estStart&&v.estFinish&&v.estFinish<v.estStart)return"Est. finish is before est. start.";return"";}
 
