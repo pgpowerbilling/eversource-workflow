@@ -147,6 +147,21 @@ table.static thead th[colspan]{text-transform:none;letter-spacing:.01em;font-siz
 .us-l{border-bottom:1px solid #c9ced8;height:24px}
 .us-foot{font-size:9px;color:#555;text-align:right;margin-top:4px}
 @media print{body.printing .us-page{width:auto}}
+/* T&E timesheet form + printable sheet */
+.te-rows{display:flex;flex-direction:column;gap:8px}
+.te-row{display:grid;gap:6px 10px;align-items:end;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.te-row label.f{margin:0;min-width:0}
+.te-lab{grid-template-columns:minmax(140px,2fr) minmax(170px,2.2fr) repeat(3,minmax(58px,.55fr)) auto auto auto}
+.te-eq{grid-template-columns:minmax(220px,3fr) minmax(110px,1fr) minmax(70px,.6fr) auto}
+.te-sub{grid-template-columns:minmax(150px,2fr) minmax(180px,3fr) minmax(100px,1fr) auto}
+.te-ro{grid-template-columns:minmax(160px,2fr) minmax(200px,2fr) auto}
+.te-chk{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11.5px;color:var(--muted);padding-bottom:6px}
+.te-chk input{width:20px;height:20px}
+@media(max-width:760px){.te-lab{grid-template-columns:repeat(3,1fr)}.te-lab .nm,.te-lab .cl{grid-column:1/-1}.te-eq{grid-template-columns:1fr 1fr auto}.te-eq .it{grid-column:1/-1}.te-sub{grid-template-columns:1fr auto}.te-sub .ds{grid-column:1/-1}.te-ro{grid-template-columns:1fr auto}.te-ro .cl{grid-column:1/-1}}
+.te-sec td{height:23px}
+.te-sec .q2{width:150px;border-left:1px solid #c9ced8;text-align:center;font-size:10px}
+.te-sec td:nth-child(2){border-left:1px solid #c9ced8}
+
 </style>
 <script>/* never keep sign-in details in the address bar or history */(function(){try{if(/[?&](password|username)=/i.test(location.search))history.replaceState(null,"",location.pathname+location.hash);}catch(e){}})();</script>
 </head>
@@ -186,7 +201,7 @@ table.static thead th[colspan]{text-transform:none;letter-spacing:.01em;font-siz
       <a href="#rates" data-nav="rates" class="nocrew" hidden>Rates</a>
     </nav>
     <div class="mast-actions">
-      <button class="btn primary w-only" id="btn-new" type="button">+ New unit sheet</button>
+      <button class="btn primary w-only" id="btn-new" type="button">+ New sheet</button>
     </div>
   </div></div>
 </header>

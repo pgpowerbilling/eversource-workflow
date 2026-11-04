@@ -54,7 +54,7 @@ const dateCell=d=>d.workDate?fmtD(d.workDate):'<span class="chip c-req">No date<
 const crewCell=d=>String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">No crew / lead</span>';
 /* what a sheet still needs before the Construction Manager can sign it */
 const signGaps=d=>[!d.workDate?"work date":"",!String(d.crew||"").trim()?"crew / lead":""].filter(Boolean);
-function sheetPoleText(d){const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
+function sheetPoleText(d){if(d.kind==="te")return"T&E daily timesheet";const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
 
 /* ---------- crypto (same scheme as the AP Invoice Tracker) ---------- */
 const subtle=crypto.subtle,te=new TextEncoder(),td=new TextDecoder();
@@ -185,8 +185,8 @@ async function commitDoc(id,op,hist,silent){
 async function createDoc(type,doc,hist){
   if(!canSave())return null;const id=newId(type==="sheet"?"s-":"i-");const file=hexId(12);setBusy(1);
   try{
-    const no=await commitIndex(ix=>{ix.seq=ix.seq||{};ix.docs=ix.docs||{};let n=null;if(type==="sheet"){ix.seq.sheet=(ix.seq.sheet||0)+1;n=ix.seq.sheet;}ix.docs[id]={file,type};return n;},"Workflow: add record");
-    doc.type=type;if(type==="sheet")doc.no="US-"+String(no).padStart(4,"0");
+    const no=await commitIndex(ix=>{ix.seq=ix.seq||{};ix.docs=ix.docs||{};let n=null;if(type==="sheet"&&doc.kind==="te"){ix.seq.te=(ix.seq.te||0)+1;n=ix.seq.te;}else if(type==="sheet"){ix.seq.sheet=(ix.seq.sheet||0)+1;n=ix.seq.sheet;}ix.docs[id]={file,type};return n;},"Workflow: add record");
+    doc.type=type;if(type==="sheet")doc.no=(doc.kind==="te"?"TE-":"US-")+String(no).padStart(4,"0");
     doc.createdAt=new Date().toISOString();doc.createdBy=S.me.name;doc.createdByKey=S.myKey;stamp(doc,hist);
     S.shas[file]=await ghPut("data/docs/"+file+".enc.json",JSON.stringify(await encJson(S.dek,doc)),null,"Workflow: add record");
     S.docs.set(id,doc);refresh();return id;
@@ -355,6 +355,7 @@ function refresh(){
 
 /* ---------- pricing (rates from the template's Unit Rate Master; no rounding until display / final total) ---------- */
 function priceSheet(d){
+  if(d.kind==="te")return priceTe(d);
   const j=jobById(d.jobId),p=poleById(j,d.poleId),area=poleArea(j,p);const errs=[];
   if(!p)errs.push("Pole is not linked to the packet's pole list");
   if(!area)errs.push("No pricing area set for this pole");
@@ -371,7 +372,7 @@ function renderSheets(){
   const all=visibleSheets();
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
-  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
+  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button>'+(jobs().some(j=>isTeJob(j)&&!j.archived)?'<button class="btn primary big w-only" type="button" id="cta-te">+ New T&amp;E timesheet</button>':"")+'</div></div>':'<a class="back" href="#overview">← Overview</a>')+
     '<h2 class="sec">Workflow</h2><section class="tiles">'+
     tile("Awaiting CM",cnt(ST.SUB),"Sheets to review",false)+tile("Returned to field",cnt(ST.RET),"Sent back for fixes",cnt(ST.RET)>0)+
     tile("Ready to bill",cnt(ST.OK)+cnt(ST.GF),"Signed by the CM",false)+tile("Invoiced",cnt(ST.INV),"On an invoice",false)+"</section>"+
@@ -379,7 +380,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
-  const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null);
+  const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");const ctt=document.getElementById("cta-te");if(ctt)ctt.onclick=()=>openTeForm(null);
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));
   const q=document.getElementById("f-q"),st=document.getElementById("f-st"),jb=document.getElementById("f-job");st.value=S.f.status;jb.value=S.f.job;
   q.oninput=()=>{S.f.q=q.value;fill();};st.onchange=()=>{S.f.status=st.value;fill();};jb.onchange=()=>{S.f.job=jb.value;fill();};
@@ -392,7 +393,7 @@ function renderSheets(){
     document.getElementById("f-count").textContent=rows.length+" sheet"+(rows.length===1?"":"s");
     const tb=document.getElementById("tb");
     tb.innerHTML=rows.length?rows.map(s=>{const j=jobById(s.jobId);const n=(s.lines||[]).length;const pr=can.seePrice()?priceSheet(s):null;
-      return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+'</b></td><td>'+dateCell(s)+'</td><td><div class="job-name">'+esc(j?j.name:"(job removed)")+'</div></td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+n+" unit"+(n===1?"":"s")+"</td>"+
+      return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+'</b></td><td>'+dateCell(s)+'</td><td><div class="job-name">'+esc(j?j.name:"(job removed)")+'</div></td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+(isTe(s)?esc(teSummary(s)):n+" unit"+(n===1?"":"s"))+"</td>"+
         (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+'</td><td class="sub">'+esc(fmtT(s.updatedAt))+"<br>"+esc(s.updatedBy||"")+"</td></tr>";}).join("")
       :'<tr><td colspan="9"><div class="empty"><b>No unit sheets here</b>'+(can.newSheet()?"Use + New unit sheet to log the units completed at a pole.":"Sheets appear here once crews submit them.")+"</div></td></tr>";
     bindRows(tb,id=>location.hash="sheet-"+id);
@@ -412,7 +413,7 @@ function sheetLinesHtml(d){
     (priced&&pr.lines.length?'<tfoot><tr><td colspan="4" class="num"><b>Pole total'+(pr.area?" · "+esc(pr.area):"")+'</b></td><td class="mono num"><b>'+(pr.total==null?"Incomplete":money(pr.total))+'</b></td><td class="sub">Calculated: Σ qty × area rate, USD</td></tr></tfoot>':"")+"</table></div>";}
 function renderSheet(){
   const d=S.docs.get(S.docId);
-  if(!d||d.type!=="sheet"||(role()==="crew"&&d.createdByKey!==S.myKey)){main.innerHTML='<a class="back" href="#sheets">← Unit sheets</a><div class="empty"><b>Sheet not found</b>It may have been removed.</div>';return;}
+  if(!d||d.type!=="sheet"||(role()==="crew"&&d.createdByKey!==S.myKey)){main.innerHTML='<a class="back" href="#sheets">← Sheets</a><div class="empty"><b>Sheet not found</b>It may have been removed.</div>';return;}
   const j=jobById(d.jobId);const p=poleById(j,d.poleId);const id=S.docId;
   const acts=[];
   if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
@@ -424,17 +425,17 @@ function renderSheet(){
   const ret=d.status===ST.RET&&d.returnNote?'<div class="banner bad"><b>Returned by '+esc(d.returnedBy||"")+":</b> "+esc(d.returnNote)+"</div>":"";
   const hold=d.hold&&d.hold.on?'<div class="banner"><b>On hold — '+esc(d.hold.by)+":</b> "+esc(d.hold.note)+"</div>":"";
   main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← My unit sheets</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
-    '<section class="jobhead"><div><h1>Unit sheet '+esc(d.no)+'</h1><div class="meta">'+stChip(d)+"<span>"+esc(j?j.name:"(job removed)")+"</span><span>"+esc(fmtD(d.workDate))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
-    '<section class="details">'+dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+
+    '<section class="jobhead"><div><h1>'+(isTe(d)?"T&amp;E timesheet ":"Unit sheet ")+esc(d.no)+'</h1><div class="meta">'+stChip(d)+"<span>"+esc(j?j.name:"(job removed)")+"</span><span>"+esc(fmtD(d.workDate))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
+    '<section class="details">'+(isTe(d)?teDetailsHtml(d)+"</section>"+teBodyHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d):dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+
       dl("Pole # / location",esc(p?p.esPole+" — "+p.street+", "+p.town:(d.poleText?d.poleText+" (not on packet list)":"")),true)+
       (p?dl("Ticket ID",esc(p.ticket))+dl("VZ pole #",esc(p.vzPole))+dl("Pricing area",esc(poleArea(j,p))||'<span class="late">Not set</span>'):"")+
       dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(d.billAt?dl("Billing approval",esc(d.billBy+" · "+fmtT(d.billAt))):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
       (d.source?dl("Uploaded from",'<button class="btn sm" type="button" id="a-src">'+esc(d.source.name)+"</button> page "+esc(d.source.page)):"")+(d.notes?dl("Notes / extras / difficulty justification",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"")+(d.billNote?dl("Billing note",esc(d.billNote),true):"")+"</section>"+
-    '<h2 class="sec">Units</h2>'+sheetLinesHtml(d)+'<h2 class="sec">Photos</h2>'+photosSectionHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d);
+    '<h2 class="sec">Units</h2>'+sheetLinesHtml(d)+'<h2 class="sec">Photos</h2>'+photosSectionHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d));
   fillPhotoImgs(main);main.querySelectorAll("[data-open-photo]").forEach(a=>a.onclick=ev=>{ev.preventDefault();openPhoto(d,a.dataset.openPhoto);});
   const on=(sel,fn)=>{const b=document.getElementById(sel);if(b)b.onclick=fn;};
   const guard=want=>x=>{if(x.status!==want)throw new Error("This sheet was already moved to "+(ST_LABEL[x.status]||x.status)+" by someone else.");};
-  on("a-edit",()=>openSheetForm(id));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));
+  on("a-edit",()=>isTe(d)?openTeForm(id):openSheetForm(id));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));on("a-scan",()=>openPackage(d.scan,document.getElementById("a-scan")));
   on("a-hold",()=>{const h=d.hold&&d.hold.on;confirmBox(h?"Release hold on "+d.no+"?":"Put "+d.no+" on hold?",h?"The sheet continues through approval.":"The sheet stays where it is but is flagged and can't be invoiced until the hold is released.",h?"Release hold":"Hold",async n=>{
     await commitDoc(id,x=>{x.hold=h?{on:false}:{on:true,note:n,by:S.me.name,at:new Date().toISOString()};},h?"Hold released"+(n?": "+n:""):"Put on hold: "+n);},{note:h?"Note":"Reason for hold",noteReq:!h});});
   on("a-gfok",()=>openGfSign([id]));
@@ -494,12 +495,17 @@ function openPhoto(d,k){const m=d.photos&&d.photos[k];if(!m)return;
   fillPhotoImgs(mm);mm.querySelector("#ph-dl").onclick=async()=>{try{const u=await photoUrl(m);const a=document.createElement("a");a.href=u;a.download=d.no+"-"+k+".jpg";document.body.appendChild(a);a.click();a.remove();}catch(e){toast(errText(e));}};}
 
 /* ---------- crew daily unit sheet form (matches the paper checklist) ---------- */
-function openSheetForm(id,presetJob){
+function openSheetForm(id,presetJob,only){
   if(id==null&&!can.newSheet()){canSave();return;}
   const src=id?S.docs.get(id):null;
+  if(src&&isTe(src))return openTeForm(id);if(!id&&presetJob&&isTeJob(jobById(presetJob)))return openTeForm(null,presetJob);
+  if(!id&&!presetJob&&only!=="units"){const hasTe=jobs().some(j=>isTeJob(j)&&!j.archived),hasU=jobs().some(j=>!isTeJob(j)&&!j.archived);
+    if(hasTe&&!hasU)return openTeForm(null);
+    if(hasTe&&hasU){const c=modal("New sheet",'<p class="sub" style="margin:0">Which kind of job is this for?</p><div class="row-inline"><button class="btn primary big" type="button" id="ns-u">Unit sheet</button><button class="btn primary big" type="button" id="ns-t">T&amp;E timesheet</button></div>','<button class="btn" type="button" data-x>Cancel</button>');
+      c.querySelector("#ns-u").onclick=()=>{closeOverlay();openSheetForm(null,null,"units");};c.querySelector("#ns-t").onclick=()=>{closeOverlay();openTeForm(null);};return;}}
   const d=src?JSON.parse(JSON.stringify(src)):{jobId:"",poleId:"",poleText:"",workDate:todayStr(),crew:(S.me&&S.me.crew)||(role()==="crew"?S.me.name:""),awc:"",wo:"",fwo:"",poleSet:"",notes:"",lines:[]};
   if(!id&&presetJob)d.jobId=presetJob;
-  const act=jobs().filter(j=>!j.archived||j.id===d.jobId);
+  const act=jobs().filter(j=>!isTeJob(j)&&(!j.archived||j.id===d.jobId));
   if(!act.length){toast(can.setup()?"Add a job first (Add Job).":"No jobs are set up yet. Ask billing to add the job.",7000);return;}
   if(!d.jobId&&act.length===1)d.jobId=act[0].id;
   const qty={};const notes={};(d.lines||[]).forEach(l=>{qty[l.key]=l.qty;notes[l.key]=l.note||"";});
@@ -656,7 +662,7 @@ function renderOverview(){
     '<div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Customer</th><th class="nosort">PO</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Awaiting CM</th><th class="nosort">Awaiting billing</th><th class="nosort">Ready to invoice</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th></tr></thead><tbody id="ov-jobs"></tbody></table></div>';
   const tb=document.getElementById("ov-jobs");
   tb.innerHTML=list.length?list.map(j=>{const st=jobStats(j,ss);const pct=st.locs?st.doneLocs/st.locs:0;
-    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+st.locs+'</td><td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+st.started+" started</div></td>"+
+    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+(isTeJob(j)?'<span class="chip c-sch">T&amp;E</span>':st.locs)+"</td>"+(isTeJob(j)?'<td><span class="sub">'+st.sheets+" timesheet"+(st.sheets===1?"":"s")+"</span></td>":'<td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+st.started+" started</div></td>")+
       '<td class="mono">'+(st.sub||"")+'</td><td class="mono">'+(st.gf||"")+'</td><td class="mono">'+(st.ok||"")+"</td>"+(can.seePrice()?'<td class="mono num">'+(st.ok+st.inv?(st.apprOk?money(st.appr):'<span class="sub">Check pricing</span>'):"")+"</td>":"")+
       "<td>"+(j.test?'<span class="chip c-sch">Example</span> ':"")+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+(st.ret?' <span class="chip c-bad">'+st.ret+" returned</span>":"")+(st.hold?' <span class="chip c-bad">'+st.hold+" on hold</span>":"")+"</td></tr>";}).join("")
     :'<tr><td colspan="10"><div class="empty"><b>No jobs yet</b>'+(can.setup()?'Use <a href="#addjob">Add Job</a> to set up the first job and its locations.':"Billing sets up jobs before crews can log units.")+"</div></td></tr>";
@@ -668,14 +674,14 @@ function renderOverview(){
 
 /* ---------- GF sign-off: tick sheets, sign, and they move to Ready to bill ---------- */
 const canGfSign=()=>W()&&(isAdmin()||role()==="gf");
-function unitsText(d){return(d.lines||[]).map(l=>unitInfo(l.key).item+" × "+fmtN(l.qty)).join(", ");}
+function unitsText(d){if(d.kind==="te")return teSummary(d);return(d.lines||[]).map(l=>unitInfo(l.key).item+" × "+fmtN(l.qty)).join(", ");}
 function gfTable(host,list,showJob){
   const sel=new Set();
   host.innerHTML=list.length?'<div class="row-inline" style="margin-bottom:8px;align-items:center"><button class="btn sm" type="button" data-all>Select all</button><button class="btn sm" type="button" data-none>Clear</button><span class="sub" data-cnt></span><span style="margin-left:auto"></span><button class="btn primary" type="button" data-sign disabled>CM sign &amp; approve</button></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort" style="width:36px"></th><th class="nosort">Sheet #</th><th class="nosort">Work date</th>'+(showJob?'<th class="nosort">Job</th>':"")+'<th class="nosort">Location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Photos</th><th class="nosort">Notes</th></tr></thead><tbody>'+
     list.map(s=>{const pr=can.seePrice()?priceSheet(s):null;const held=s.hold&&s.hold.on;const j=jobById(s.jobId);
       return'<tr data-id="'+esc(s.id)+'"'+(held?' class="removed" title="On hold"':"")+'><td><input type="checkbox" data-s="'+esc(s.id)+'"'+(held?" disabled":"")+' aria-label="Select '+esc(s.no)+'"></td><td class="mono"><a href="#sheet-'+esc(s.id)+'"><b>'+esc(s.no)+"</b></a>"+(held?' <span class="chip c-bad">On hold</span>':"")+"</td><td>"+dateCell(s)+"</td>"+(showJob?"<td>"+esc(j?j.name:"")+"</td>":"")+'<td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="wrapc">'+esc(unitsText(s))+"</td>"+
-        (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+photoBadges(s)+'</td><td class="wrapc sub">'+esc(s.notes)+"</td></tr>";}).join("")+"</tbody></table></div>"
+        (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+(isTe(s)?'<span class="sub">n/a</span>':photoBadges(s))+'</td><td class="wrapc sub">'+esc(s.notes)+"</td></tr>";}).join("")+"</tbody></table></div>"
     :'<div class="empty"><b>Nothing waiting for the CM</b>New unit sheets show up here to be signed.</div>';
   if(!list.length)return;
   const boxes=[...host.querySelectorAll("[data-s]")];const btn=host.querySelector("[data-sign]");
@@ -692,7 +698,7 @@ function openGfSign(ids){
   if(undated.length)toast("Not signed — still missing: "+undated.map(d=>d.no+" ("+signGaps(d).join(" and ")+")").join(", ")+". Open "+(undated.length===1?"it":"them")+" and use Edit sheet to fill "+(undated.length===1?"it":"them")+" in.",10000);
   if(!list.length){if(!undated.length)toast("Those sheets were already signed or moved.");return;}
   const tot=can.seePrice()?list.map(priceSheet):[];const known=tot.filter(x=>x.total!=null);const sum=known.reduce((a,x)=>a+x.total,0);
-  const m=modal("CM sign-off",'<p style="margin:0">'+list.length+" unit sheet"+(list.length===1?"":"s")+": "+esc(list.map(d=>d.no).join(", "))+"</p>"+
+  const m=modal("CM sign-off",'<p style="margin:0">'+list.length+" sheet"+(list.length===1?"":"s")+": "+esc(list.map(d=>d.no).join(", "))+"</p>"+
     (can.seePrice()&&known.length?'<p class="sub" style="margin:0">Total '+money(sum)+(known.length<list.length?" ("+(list.length-known.length)+" sheet(s) still need pricing fixed)":"")+"</p>":"")+
     '<label class="sigbox" for="gf-ok"><input type="checkbox" id="gf-ok"><span><b>Signed: '+esc(S.me.name)+'</b><br>I verified the units and quantities on '+(list.length===1?"this sheet":"these sheets")+" against the work completed in the field.</span></label>"+
     '<p class="sub" style="margin:0">Signing records your name with today\'s date and time and moves '+(list.length===1?"the sheet":"them")+" to Ready to bill.</p>",
@@ -709,6 +715,7 @@ function openGfSign(ids){
 function renderJob(){
   const j=jobById(S.docId);
   if(!j){main.innerHTML='<a class="back" href="#overview">← Overview</a><div class="empty"><b>Job not found</b></div>';return;}
+  if(isTeJob(j))return renderTeJob(j);
   const ss=visibleSheets();const st=jobStats(j,ss);const gfList=ss.filter(s=>s.jobId===j.id&&s.status===ST.SUB).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no)));
   if(!S.jobTab)S.jobTab=canGfSign()&&gfList.length?"gf":"locs";const tab=S.jobTab;
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
@@ -939,17 +946,20 @@ function checkLocs(rows,existing){
     const t=L.ticket.trim().toUpperCase();if(t){if(seen.has(t))errs.push("Row "+(i+1)+": Ticket "+L.ticket+" is already on this job.");seen.add(t);}});
   return{used:used.map(L=>{const o={};Object.keys(L).forEach(k=>{if(k[0]!=="_")o[k]=String(L[k]==null?"":L[k]).trim();});return o;}),errs};}
 /* ---------- job fields (Add Job form + Edit job) ---------- */
-const JOB_FIELDS=[["name","Job name *","text",true],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
-const blankJob=()=>({name:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
+const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teArea","T&E service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
+const blankJob=()=>({name:"",billing:"units",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
 function gfNames(){const p=(S.index&&S.index.profiles)||{};return Object.values(p).filter(x=>x.role==="gf").map(x=>x.name).sort();}
 function jobFieldsHtml(pre,v){
   return JOB_FIELDS.map(([k,l,t,wide])=>{const id=pre+"-"+k;const val=v[k]==null?"":v[k];
-    if(t==="area")return'<label class="f" for="'+id+'">'+esc(l)+areaSelect(id,val)+"</label>";
+    if(t==="area")return'<label class="f" data-bill="units" for="'+id+'">'+esc(l)+areaSelect(id,val)+"</label>";
+    if(t==="billing")return'<label class="f" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-billsel><option value="units"'+(val!=="te"?" selected":"")+'>Units (unit sheets)</option><option value="te"'+(val==="te"?" selected":"")+">T&amp;E (time &amp; equipment)</option></select></label>";
+    if(t==="tearea"){const ar=teRates()?teRates().areas:[];return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'"><option value="">— not set —</option>'+ar.map(a=>"<option"+(a===val?" selected":"")+">"+esc(a)+"</option>").join("")+(val&&!ar.includes(val)?"<option selected>"+esc(val)+"</option>":"")+"</select></label>";}
     if(t==="textarea")return'<label class="f wide" for="'+id+'">'+esc(l)+'<textarea id="'+id+'">'+esc(val)+"</textarea></label>";
     if(t==="gf")return'<label class="f" for="'+id+'">'+esc(l)+'<input id="'+id+'" list="'+pre+'-gfl" value="'+esc(val)+'" autocomplete="off"><datalist id="'+pre+'-gfl">'+gfNames().map(n=>"<option>"+esc(n)+"</option>").join("")+"</datalist></label>";
     return'<label class="f'+(wide?" wide":"")+'" for="'+id+'">'+esc(l)+'<input id="'+id+'"'+(t==="date"?' type="date"':"")+' value="'+esc(val)+'"></label>';}).join("");}
-function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});return v;}
-function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";
+function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te")v.teArea="";return v;}
+function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const upd=()=>{root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(sel.value==="te"?"te":"units");});};sel.addEventListener("change",upd);upd();}
+function jobFieldErr(v,selfId){if(!v.name)return"Enter the job name.";if(!v.customer)return"Enter the customer.";if(v.billing==="te"&&!v.teArea)return"Pick the T&E service area (it sets which labor rates apply).";
   if(jobs().some(j=>j.id!==selfId&&j.name.trim().toLowerCase()===v.name.toLowerCase()))return"A job named "+v.name+" already exists.";
   if(v.estStart&&v.estFinish&&v.estFinish<v.estStart)return"Est. finish is before est. start.";return"";}
 
@@ -972,14 +982,14 @@ function renderAddJob(){
   if(!can.setup()){main.innerHTML='<div class="empty"><b>Billing sets up jobs</b>Ask an admin or billing approver to add the job.</div>';return;}
   const list=jobs().slice().sort((a,b)=>(a.archived?1:0)-(b.archived?1:0)||String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
   const just=S.justAdded&&jobById(S.justAdded);S.justAdded=null;
-  main.innerHTML='<section class="jobhead"><div><h1>Add Job</h1><div class="meta">'+list.length+" job"+(list.length===1?"":"s")+' set up</div></div><div class="acts"><button class="btn primary" type="button" id="aj-new">+ Add another job</button></div></section>'+
+  main.innerHTML='<section class="jobhead"><div><h1>Add Job</h1><div class="meta">'+list.length+" job"+(list.length===1?"":"s")+' set up</div></div><div class="acts"><button class="btn" type="button" id="aj-roster">Crew roster</button><button class="btn primary" type="button" id="aj-new">+ Add another job</button></div></section>'+
     (just?'<div class="okbox">Job <b>'+esc(just.name)+"</b> was created with "+(just.poles||[]).length+' location(s). <a href="#job-'+esc(just.id)+'">Open it</a> or add another job.</div>':"")+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Customer</th><th class="nosort">PO</th><th class="nosort">WO / Job #</th><th class="nosort">Town / area</th><th class="nosort">Construction Manager</th><th class="nosort">Est. start</th><th class="nosort">Est. finish</th><th class="nosort">Locations</th><th class="nosort">Job package</th><th class="nosort">Status</th><th class="nosort"></th></tr></thead><tbody id="aj-list"></tbody></table></div>';
   const tb=document.getElementById("aj-list");
-  tb.innerHTML=list.map(j=>'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+esc(j.wo)+"</td><td>"+esc(j.town)+"</td><td>"+esc(j.gf)+"</td><td>"+fmtD(j.estStart)+"</td><td>"+fmtD(j.estFinish)+'</td><td class="mono">'+(j.poles||[]).length+"</td><td>"+((j.packages||[]).length?esc(j.packages.length+" file"+(j.packages.length===1?"":"s")):'<span class="sub">—</span>')+"</td><td>"+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+'</td><td><button class="btn sm" type="button" data-edit="'+esc(j.id)+'">Edit</button></td></tr>').join("")||'<tr><td colspan="12"><div class="empty"><b>No jobs yet</b>Use + Add another job.</div></td></tr>';
+  tb.innerHTML=list.map(j=>'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+"</div>"+(isTeJob(j)?'<span class="chip c-sch">T&amp;E</span>':"")+"</td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+esc(j.wo)+"</td><td>"+esc(j.town)+"</td><td>"+esc(j.gf)+"</td><td>"+fmtD(j.estStart)+"</td><td>"+fmtD(j.estFinish)+'</td><td class="mono">'+(j.poles||[]).length+"</td><td>"+((j.packages||[]).length?esc(j.packages.length+" file"+(j.packages.length===1?"":"s")):'<span class="sub">—</span>')+"</td><td>"+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+'</td><td><button class="btn sm" type="button" data-edit="'+esc(j.id)+'">Edit</button></td></tr>').join("")||'<tr><td colspan="12"><div class="empty"><b>No jobs yet</b>Use + Add another job.</div></td></tr>';
   tb.querySelectorAll("[data-edit]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();location.hash="jobedit-"+b.dataset.edit;});
   bindRows(tb,id=>location.hash="job-"+id);
-  document.getElementById("aj-new").onclick=()=>{S.addJob=null;location.hash="addjob-new";};
+  document.getElementById("aj-new").onclick=()=>{S.addJob=null;location.hash="addjob-new";};document.getElementById("aj-roster").onclick=openRoster;
 }
 function renderAddJobForm(){
   if(!can.setup()){location.hash="addjob";return;}
@@ -989,12 +999,12 @@ function renderAddJobForm(){
     '<h2 class="sec">Job package &amp; locations</h2><div id="aj-grid"></div>'+
     '<div class="row-inline" style="justify-content:flex-end;margin-top:4px"><span class="err" id="aj-err" role="alert" style="margin:0 auto 0 0"></span><button class="btn" type="button" id="aj-cancel">Cancel</button><button class="btn primary" type="button" id="aj-save">Create job</button></div>';
   main.querySelectorAll("[id^=aj-]").forEach(el=>{if(!/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.closest("#aj-grid"))return;const ev=el.tagName==="SELECT"?"onchange":"oninput";el[ev]=()=>{st.f[el.id.slice(3)]=el.value;};});
-  locGrid(document.getElementById("aj-grid"),st);
+  locGrid(document.getElementById("aj-grid"),st);bindBilling(main);
   document.getElementById("aj-cancel").onclick=()=>{const dirty=st.rows.length||st.f.name||st.pkgFile;if(dirty&&!confirm("Discard this job?"))return;S.addJob=null;location.hash="addjob";};
   document.getElementById("aj-save").onclick=async e=>{const err=document.getElementById("aj-err");err.textContent="";const b=e.target;
     const v=readJobFields(main,"aj");const fe=jobFieldErr(v);if(fe){err.textContent=fe;return;}v.test=!!document.getElementById("aj-test").checked;
     const c=checkLocs(st.rows,[]);if(c.errs.length){err.textContent=c.errs.slice(0,3).join(" ")+(c.errs.length>3?" (+"+(c.errs.length-3)+" more)":"");return;}
-    if(!c.used.length&&!confirm("Create the job with no locations? You can add them later."))return;
+    if(!c.used.length&&v.billing!=="te"&&!confirm("Create the job with no locations? You can add them later."))return;
     if(!canSave())return;b.disabled=true;
     try{let pk=null;if(st.pkgFile){b.textContent="Uploading package…";pk=await storePackage(st.pkgFile);}
       b.textContent="Saving…";const id=newId("j-");const now=new Date().toISOString();
@@ -1030,10 +1040,11 @@ function renderJobEdit(){
     '<div class="row-inline" style="justify-content:flex-end;margin-top:4px"><span class="err" id="je-err" role="alert" style="margin:0 auto 0 0"></span><button class="btn" type="button" id="je-cancel">Cancel</button><button class="btn primary" type="button" id="je-save">Save changes</button></div>';
   main.querySelectorAll("[id^=je-]").forEach(el=>{if(!/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.id==="je-arch"||el.id==="je-test")return;el[el.tagName==="SELECT"?"onchange":"oninput"]=()=>{st.f[el.id.slice(3)]=el.value;};});
   document.getElementById("je-arch").onchange=e=>{st.archived=e.target.checked;};document.getElementById("je-test").onchange=e=>{st.test=e.target.checked;};
-  locGrid(document.getElementById("je-grid"),st);
+  locGrid(document.getElementById("je-grid"),st);bindBilling(main);
   document.getElementById("je-cancel").onclick=()=>{S.jobEdit=null;location.hash="job-"+j.id;};
   document.getElementById("je-save").onclick=async e=>{const err=document.getElementById("je-err");err.textContent="";const b=e.target;
     const v=readJobFields(main,"je");const fe=jobFieldErr(v,j.id);if(fe){err.textContent=fe;return;}v.archived=st.archived;v.test=st.test;
+    if((j.billing||"units")!==v.billing&&sheets().some(s=>s.jobId===j.id)){err.textContent="This job already has sheets, so its billing type can't change. Set up a new job instead.";return;}
     const c=checkLocs(st.rows,[]);if(c.errs.length){err.textContent=c.errs.slice(0,3).join(" ")+(c.errs.length>3?" (+"+(c.errs.length-3)+" more)":"");return;}
     const keep=st.rows.filter(L=>Object.keys(L).some(k=>k[0]!=="_"&&String(L[k]).trim()));
     const keptIds=new Set(keep.map(L=>L._id).filter(Boolean));const removed=st.orig.filter(id=>!keptIds.has(id));
@@ -1111,6 +1122,7 @@ function renderRates(){
       '<tr><td>Pole Set</td><td><b>C&amp;K</b> <span class="sub">(on the crew checklist)</span></td>'+r.areas.map(()=>'<td class="num"><span class="late">No rate</span></td>').join("")+"</tr></tbody></table></div>":'<div class="empty"><b>No rates yet</b>Load the master template to bring in the Unit Rate Master.</div>');
   document.getElementById("r-dl").onclick=async()=>{try{const b=await templateBuf();download(new Blob([b],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),tm.name);}catch(e){toast(errText(e),8000);}};
   const up=document.getElementById("r-up");if(up)up.onclick=openTemplateUpload;
+  main.insertAdjacentHTML("beforeend",'<div id="te-rates"></div>');teRatesSection(document.getElementById("te-rates"));
 }
 function openTemplateUpload(){
   if(!canRates()||!canSave())return;
@@ -1142,16 +1154,17 @@ function renderInvoices(){
     '<h2 class="sec">Invoices</h2><div class="tablebox"><table><thead><tr><th class="nosort">Invoice #</th><th class="nosort">Date</th><th class="nosort">Job</th><th class="nosort">Customer</th><th class="nosort">Locations</th><th class="nosort num">Total</th><th class="nosort">Status</th></tr></thead><tbody id="it"></tbody></table></div>';
   const rb=document.getElementById("rb");
   rb.innerHTML=jobIds.length?jobIds.map(id=>{const j=jobById(id);const sel=ready.filter(s=>s.jobId===id);const b=buildInvoice(sel);
-    return'<tr><td><div class="job-name">'+esc(j?j.name:"(job removed)")+"</div></td><td>"+esc(j?j.customer:"")+'</td><td class="mono">'+sel.length+'</td><td class="mono">'+b.poles.length+"</td><td>"+esc(b.period)+'</td><td class="mono num">'+(b.errs.length?"—":money(b.total))+"</td><td>"+(b.errs.length?'<span class="chip c-bad" title="'+esc(b.errs.join("; "))+'">'+b.errs.length+" issue"+(b.errs.length===1?"":"s")+"</span>":'<span class="chip c-done">Ready</span>')+"</td><td>"+(can.invoice()?'<button class="btn sm primary" type="button" data-build="'+esc(id)+'">Build invoice</button>':"")+"</td></tr>";}).join("")
+    return'<tr><td><div class="job-name">'+esc(j?j.name:"(job removed)")+"</div></td><td>"+esc(j?j.customer:"")+'</td><td class="mono">'+sel.length+'</td><td class="mono">'+(b.kind==="te"?b.days.length+" day"+(b.days.length===1?"":"s")+" (T&amp;E)":b.poles.length)+"</td><td>"+esc(b.period)+'</td><td class="mono num">'+(b.errs.length?"—":money(b.total))+"</td><td>"+(b.errs.length?'<span class="chip c-bad" title="'+esc(b.errs.join("; "))+'">'+b.errs.length+" issue"+(b.errs.length===1?"":"s")+"</span>":'<span class="chip c-done">Ready</span>')+"</td><td>"+(can.invoice()?'<button class="btn sm primary" type="button" data-build="'+esc(id)+'">Build invoice</button>':"")+"</td></tr>";}).join("")
     :'<tr><td colspan="8"><div class="empty"><b>Nothing ready to bill</b>Unit sheets show up here once billing approves them for invoice.</div></td></tr>';
   rb.querySelectorAll("[data-build]").forEach(b=>b.onclick=()=>openInvoiceForm(b.dataset.build));
   const tb=document.getElementById("it");
-  tb.innerHTML=all.length?all.map(i=>'<tr tabindex="0" data-id="'+esc(i.id)+'"><td class="mono"><b>'+esc(i.no)+"</b></td><td>"+fmtD(i.date)+'</td><td><div class="job-name">'+esc(i.jobName)+"</div></td><td>"+esc(i.customer)+'</td><td class="mono">'+(i.poles||[]).length+'</td><td class="mono num">'+money(i.total)+"</td><td>"+invChip(i.status)+"</td></tr>").join("")
+  tb.innerHTML=all.length?all.map(i=>'<tr tabindex="0" data-id="'+esc(i.id)+'"><td class="mono"><b>'+esc(i.no)+"</b></td><td>"+fmtD(i.date)+'</td><td><div class="job-name">'+esc(i.jobName)+"</div></td><td>"+esc(i.customer)+'</td><td class="mono">'+(i.kind==="te"?(i.days||[]).length+" day(s) T&amp;E":(i.poles||[]).length)+'</td><td class="mono num">'+money(i.total)+"</td><td>"+invChip(i.status)+"</td></tr>").join("")
     :'<tr><td colspan="7"><div class="empty"><b>No invoices yet</b></div></td></tr>';
   bindRows(tb,id=>location.hash="inv-"+id);
 }
 const invChip=s=>'<span class="chip '+({Draft:"c-req",Sent:"c-done",Void:"c-bad"}[s]||"c-stage")+'">'+esc(s)+"</span>";
 function buildInvoice(sel){
+  if(sel.length&&(isTe(sel[0])||isTeJob(jobById(sel[0].jobId))))return buildTeInvoice(sel);
   const errs=[];const byPole=new Map();
   sel.forEach(s=>{const pr=priceSheet(s);if(s.hold&&s.hold.on)errs.push(s.no+" is on hold");pr.errs.forEach(e=>errs.push(s.no+": "+e));if(!pr.pole)return;
     const k=pr.pole.id;const e=byPole.get(k)||{pole:pr.pole,area:pr.area,sheets:[],qty:new Map()};e.sheets.push(s);
@@ -1181,16 +1194,16 @@ function openInvoiceForm(presetJob){
     '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="if-save">Create invoice</button>',"wide");
   const jobSel=m.querySelector("#if-job");let chosen=new Set();let built=null;
   function onJob(){const j=jobById(jobSel.value);m.querySelector("#if-po").value=j?j.po:"";m.querySelector("#if-pkg").value=j?j.name:"";const list=ready.filter(s=>s.jobId===jobSel.value).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate)));
-    const slots=(S.index.template&&S.index.template.slots)||40;chosen=new Set();const pc=new Set();list.forEach(s=>{const k=s.poleId||s.id;if(pc.has(k)||pc.size<slots){pc.add(k);chosen.add(s.id);}});
-    m.querySelector("#if-sheets").innerHTML='<div class="ulist" style="max-height:260px;overflow:auto">'+list.map(s=>'<label class="u" style="grid-template-columns:auto 1fr auto;cursor:pointer"><input type="checkbox" data-s="'+esc(s.id)+'"'+(chosen.has(s.id)?" checked":"")+'><span><b class="mono">'+esc(s.no)+"</b> · "+esc(fmtD(s.workDate))+" · "+esc(sheetPoleText(s))+'</span><span class="mono">'+(s.lines||[]).length+" units</span></label>").join("")+"</div>";
+    const slots=(S.index.template&&S.index.template.slots)||40;chosen=new Set();const pc=new Set();list.forEach(s=>{const k=s.poleId||s.id;if(isTe(s)||pc.has(k)||pc.size<slots){pc.add(k);chosen.add(s.id);}});
+    m.querySelector("#if-sheets").innerHTML='<div class="ulist" style="max-height:260px;overflow:auto">'+list.map(s=>'<label class="u" style="grid-template-columns:auto 1fr auto;cursor:pointer"><input type="checkbox" data-s="'+esc(s.id)+'"'+(chosen.has(s.id)?" checked":"")+'><span><b class="mono">'+esc(s.no)+"</b> · "+esc(fmtD(s.workDate))+" · "+esc(sheetPoleText(s))+'</span><span class="mono">'+(isTe(s)?esc(teSummary(s)):(s.lines||[]).length+" units")+"</span></label>").join("")+"</div>";
     m.querySelectorAll("[data-s]").forEach(c=>c.onchange=()=>{if(c.checked)chosen.add(c.dataset.s);else chosen.delete(c.dataset.s);prev();});prev();}
   m.querySelector("#if-all").onclick=()=>{m.querySelectorAll("[data-s]").forEach(c=>{c.checked=true;chosen.add(c.dataset.s);});prev();};
   m.querySelector("#if-none").onclick=()=>{m.querySelectorAll("[data-s]").forEach(c=>{c.checked=false;});chosen.clear();prev();};
   function prev(){const sel=ready.filter(s=>chosen.has(s.id));built=buildInvoice(sel);m.querySelector("#if-per").value=built.period;
-    m.querySelector("#if-prev").innerHTML=(built.errs.length?'<div class="banner bad"><b>Fix before invoicing:</b><br>'+built.errs.map(esc).join("<br>")+"</div>":"")+
+    m.querySelector("#if-prev").innerHTML=(built.errs.length?'<div class="banner bad"><b>Fix before invoicing:</b><br>'+built.errs.map(esc).join("<br>")+"</div>":"")+(built.kind==="te"?teInvPreviewHtml(built):
       '<div class="tablebox"><table class="static"><thead><tr><th>Pole ID</th><th>WO / Job #</th><th>Location / address</th><th>Pole #</th><th>Pricing area</th><th class="num">Amount</th></tr></thead><tbody>'+
       (built.poles.map(p=>'<tr><td class="mono">'+p.slot+'</td><td class="mono">'+esc(p.woJob)+"</td><td>"+esc(p.street+", "+p.town)+'</td><td class="mono">'+esc(p.esPole)+"</td><td>"+esc(p.area)+'</td><td class="mono num">'+money(p.total)+"</td></tr>").join("")||'<tr><td colspan="6" class="sub">Select at least one sheet.</td></tr>')+
-      '</tbody><tfoot><tr><td colspan="5" class="num"><b>Total (USD) · '+built.poles.length+" pole"+(built.poles.length===1?"":"s")+'</b></td><td class="mono num"><b>'+(built.errs.length?"—":money(built.total))+"</b></td></tr></tfoot></table></div>";
+      '</tbody><tfoot><tr><td colspan="5" class="num"><b>Total (USD) · '+built.poles.length+" pole"+(built.poles.length===1?"":"s")+'</b></td><td class="mono num"><b>'+(built.errs.length?"—":money(built.total))+"</b></td></tr></tfoot></table></div>");
     m.querySelector("#if-save").disabled=!!built.errs.length||!sel.length;}
   if(presetJob&&jobIds.includes(presetJob))jobSel.value=presetJob;
   jobSel.onchange=onJob;onJob();
@@ -1201,6 +1214,11 @@ function openInvoiceForm(presetJob){
     const sel=ready.filter(s=>chosen.has(s.id));if(!sel.length)throw new Error("Select at least one sheet.");
     const b=buildInvoice(sel);if(b.errs.length)throw new Error("Fix the items listed first.");
     const j=jobById(jobSel.value);const r=rates();
+    if(b.kind==="te"){const tdoc={kind:"te",no,date,jobId:j.id,jobName:j.name,customer:j.customer||(r&&r.customer)||"",terms:(r&&r.terms)||"",po:m.querySelector("#if-po").value.trim(),period:m.querySelector("#if-per").value.trim(),pkg:m.querySelector("#if-pkg").value.trim(),
+        sheetIds:sel.map(s=>s.id),days:b.days,summary:b.summary,labor:b.labor,equipment:b.equipment,poles:[],total:b.total,status:"Draft",from:(r&&r.from)||[]};
+      const tid=await createDoc("invoice",tdoc,"T&E invoice built: "+b.days.length+" day(s) · total "+money(b.total));if(!tid)return;const tf=[];
+      for(const s of sel){const ok=await commitDoc(s.id,x=>{if(!isReady(x))throw new Error(x.no+" is no longer ready to bill.");x.status=ST.INV;x.invoiceId=tid;x.invoiceNo=no;},"Added to invoice "+no,true);if(!ok)tf.push(s.no);}
+      closeOverlay();location.hash="inv-"+tid;if(tf.length)toast("Invoice created, but these timesheets could not be marked invoiced: "+tf.join(", ")+". Check them.",12000);else toast("Invoice "+no+" created");return;}
     b.poles.forEach(p=>{p.billBy=S.me.name;p.billDate=fmtD(date);});
     const doc={no,date,jobId:j.id,jobName:j.name,customer:j.customer||(r&&r.customer)||"",terms:(r&&r.terms)||"",po:m.querySelector("#if-po").value.trim(),period:m.querySelector("#if-per").value.trim(),pkg:m.querySelector("#if-pkg").value.trim(),
       sheetIds:sel.map(s=>s.id),poles:b.poles,total:b.total,status:"Draft",template:S.index.template?S.index.template.name:"",from:(r&&r.from)||[]};
@@ -1215,6 +1233,7 @@ function openInvoiceForm(presetJob){
 function renderInvoice(){
   const i=S.docs.get(S.docId);const id=S.docId;
   if(!i||i.type!=="invoice"||!can.seeInvoices()){main.innerHTML='<a class="back" href="#invoices">← Invoices</a><div class="empty"><b>Invoice not found</b></div>';return;}
+  if(i.kind==="te")return renderTeInvoice(i,id);
   const chk=cents(i.poles.reduce((a,p)=>a+p.lines.reduce((x,l)=>x+(l.ext||0),0),0));const tieOk=chk===cents(i.total);
   const acts=['<button class="btn primary" type="button" id="v-xls">Eversource template (.xlsx)</button><button class="btn" type="button" id="v-pdf">P&amp;G invoice PDF</button>'];
   if(can.invoice()&&i.status==="Draft")acts.push('<button class="btn" type="button" id="v-sent">Mark as sent</button>');
@@ -1267,5 +1286,5 @@ function printInvoice(i){
 }
 
 initLogin();
-window.__wf={S,priceSheet,buildInvoice};
+window.__wf={S,priceSheet,buildInvoice,priceTe,sheets};
 })();

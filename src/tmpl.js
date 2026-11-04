@@ -27,7 +27,7 @@ async function read(t,name){
   const x=await sheetXml(t,name);const out=new Map();
   const re=/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;let m;
   while((m=re.exec(x))){const a=m[1],body=m[2]||"";const r=/\br="([A-Z]+\d+)"/.exec(a);if(!r)continue;const ty=/\bt="([^"]+)"/.exec(a);
-    let v=null;const vm=/<v>([\s\S]*?)<\/v>/.exec(body);
+    let v=null;const vm=/<v\b[^>]*>([\s\S]*?)<\/v>/.exec(body);
     if(ty&&ty[1]==="s"&&vm)v=t.sst[+vm[1]];else if(ty&&ty[1]==="inlineStr"){v=(body.match(/<t\b[^>]*>[\s\S]*?<\/t>/g)||[]).map(s=>dec(s.replace(/^<t\b[^>]*>|<\/t>$/g,""))).join("");}
     else if(ty&&ty[1]==="str"&&vm)v=dec(vm[1]);else if(vm)v=isNaN(+vm[1])?dec(vm[1]):+vm[1];
     out.set(r[1],v);}
