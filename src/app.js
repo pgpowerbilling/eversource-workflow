@@ -54,7 +54,7 @@ const dateCell=d=>d.workDate?fmtD(d.workDate):'<span class="chip c-req">No date<
 const crewCell=d=>String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">No crew / lead</span>';
 /* what a sheet still needs before the Construction Manager can sign it */
 const signGaps=d=>[!d.workDate?"work date":"",!String(d.crew||"").trim()?"crew / lead":""].filter(Boolean);
-function sheetPoleText(d){if(d.kind==="te")return"T&E daily timesheet";const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
+function sheetPoleText(d){if(d.kind==="te"&&!d.poleId)return"T&E timesheet (no location)";const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
 
 /* ---------- crypto (same scheme as the AP Invoice Tracker) ---------- */
 const subtle=crypto.subtle,te=new TextEncoder(),td=new TextDecoder();
@@ -645,7 +645,7 @@ function drawUbl(){
 function jobStats(j,ss){
   const mine=ss.filter(s=>s.jobId===j.id);const by=st=>mine.filter(s=>s.status===st).length;
   const locs=j.poles||[];const started=new Set(mine.map(s=>s.poleId).filter(Boolean));
-  const doneLocs=locs.filter(p=>{const sh=mine.filter(s=>s.poleId===p.id);return sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV);}).length;
+  const doneLocs=locs.filter(p=>{const sh=mine.filter(s=>s.poleId===p.id);return isTeJob(j)?teLocStatus(sh)[0]==="Complete":sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV);}).length;
   let appr=0,apprOk=true;mine.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceSheet(s).total;if(t==null)apprOk=false;else appr+=t;});
   return{locs:locs.length,started:started.size,doneLocs,sub:by(ST.SUB),ret:by(ST.RET),gf:by(ST.GF),ok:by(ST.OK)+by(ST.GF),inv:by(ST.INV),hold:mine.filter(s=>s.hold&&s.hold.on).length,appr,apprOk,sheets:mine.length};}
 function renderOverview(){
@@ -662,7 +662,7 @@ function renderOverview(){
     '<div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Customer</th><th class="nosort">PO</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Awaiting CM</th><th class="nosort">Awaiting billing</th><th class="nosort">Ready to invoice</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th></tr></thead><tbody id="ov-jobs"></tbody></table></div>';
   const tb=document.getElementById("ov-jobs");
   tb.innerHTML=list.length?list.map(j=>{const st=jobStats(j,ss);const pct=st.locs?st.doneLocs/st.locs:0;
-    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+(isTeJob(j)?'<span class="chip c-sch">T&amp;E</span>':st.locs)+"</td>"+(isTeJob(j)?'<td><span class="sub">'+st.sheets+" timesheet"+(st.sheets===1?"":"s")+"</span></td>":'<td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+st.started+" started</div></td>")+
+    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+"</td>"+('<td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+st.started+" started"+(isTeJob(j)?" · "+st.doneLocs+" complete":"")+"</div></td>")+
       '<td class="mono">'+(st.sub||"")+'</td><td class="mono">'+(st.gf||"")+'</td><td class="mono">'+(st.ok||"")+"</td>"+(can.seePrice()?'<td class="mono num">'+(st.ok+st.inv?(st.apprOk?money(st.appr):'<span class="sub">Check pricing</span>'):"")+"</td>":"")+
       "<td>"+(j.test?'<span class="chip c-sch">Example</span> ':"")+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+(st.ret?' <span class="chip c-bad">'+st.ret+" returned</span>":"")+(st.hold?' <span class="chip c-bad">'+st.hold+" on hold</span>":"")+"</td></tr>";}).join("")
     :'<tr><td colspan="10"><div class="empty"><b>No jobs yet</b>'+(can.setup()?'Use <a href="#addjob">Add Job</a> to set up the first job and its locations.':"Billing sets up jobs before crews can log units.")+"</div></td></tr>";
@@ -1008,7 +1008,7 @@ function renderAddJobForm(){
   document.getElementById("aj-save").onclick=async e=>{const err=document.getElementById("aj-err");err.textContent="";const b=e.target;
     const v=readJobFields(main,"aj");const fe=jobFieldErr(v);if(fe){err.textContent=fe;return;}v.test=!!document.getElementById("aj-test").checked;
     const c=checkLocs(st.rows,[]);if(c.errs.length){err.textContent=c.errs.slice(0,3).join(" ")+(c.errs.length>3?" (+"+(c.errs.length-3)+" more)":"");return;}
-    if(!c.used.length&&v.billing!=="te"&&!confirm("Create the job with no locations? You can add them later."))return;
+    if(!c.used.length&&!confirm("Create the job with no locations? You can add them later."))return;
     if(!canSave())return;b.disabled=true;
     try{let pk=null;if(st.pkgFile){b.textContent="Uploading package…";pk=await storePackage(st.pkgFile);}
       b.textContent="Saving…";const id=newId("j-");const now=new Date().toISOString();

@@ -23,6 +23,11 @@ const teHours=d=>(d.labor||[]).reduce((a,L)=>a+TE_HRS.reduce((x,[k])=>x+(Number(
 function teSummary(d){const n=(d.labor||[]).length,e=(d.equip||[]).length;return n+" people · "+fmtN(teHours(d))+" hrs"+(e?" · "+e+" equipment":"");}
 function teRoleNames(set){const out=[];(set?[set]:teSets()).forEach(r=>r.labor.forEach(x=>{if(!out.some(o=>o.role===x.role))out.push({role:x.role,group:x.group});}));return out;}
 function teEquipNames(set){const out=[];(set?[set]:teSets()).forEach(r=>r.equipment.forEach(x=>{if(!out.some(o=>o.item===x.item))out.push({item:x.item,category:x.category});}));return out;}
+/* a T&E location is Complete once a CM-signed timesheet for it is marked "Location complete" */
+function teLocStatus(sh){if(!sh.length)return["Not started","c-stage"];const signed=x=>isReady(x)||x.status===ST.INV;
+  if(sh.some(x=>x.locComplete&&signed(x)))return["Complete","c-done"];if(sh.some(x=>x.status===ST.RET))return["Returned to field","c-bad"];
+  if(sh.some(x=>x.locComplete&&x.status===ST.SUB))return["Complete — awaiting CM","c-sch"];return["In progress","c-sch"];}
+const teLocSheets=(jobId,poleId,exceptId)=>sheets().filter(x=>isTe(x)&&x.jobId===jobId&&x.poleId===poleId&&x.id!==exceptId);
 function lastTe(jobId,beforeId){return sheets().filter(s=>isTe(s)&&s.jobId===jobId&&s.id!==beforeId).sort((a,b)=>String(b.workDate||"").localeCompare(String(a.workDate||""))||String(b.createdAt||"").localeCompare(String(a.createdAt||"")))[0]||null;}
 
 /* ---------- pricing ---------- */
@@ -183,32 +188,45 @@ function equipSelect(val,set){const es=teEquipNames(set||undefined);const cats=[
   return'<select data-k="item"><option value="">Select equipment…</option>'+cats.map(c=>'<optgroup label="'+esc(c||"Other")+'">'+es.filter(e=>e.category===c).map(e=>"<option"+(e.item===val?" selected":"")+">"+esc(e.item)+"</option>").join("")+"</optgroup>").join("")+(val&&!es.some(e=>e.item===val)?'<option selected>'+esc(val)+"</option>":"")+"</select>";}
 
 /* ---------- T&E daily timesheet form ---------- */
-function teBlank(jid){const j=jobById(jid);const prev=jid?lastTe(jid):null;const cp=x=>JSON.parse(JSON.stringify(x||[]));
-  return{kind:"te",jobId:jid||"",workDate:todayStr(),crew:prev?prev.crew:(role()==="crew"?S.me.name:""),wo:prev?prev.wo:(j?j.wo:""),notes:"",
+function teBlank(jid,pid){const j=jobById(jid);const prev=jid?lastTe(jid):null;const cp=x=>JSON.parse(JSON.stringify(x||[]));
+  return{kind:"te",jobId:jid||"",poleId:pid||"",locComplete:false,photos:{},workDate:todayStr(),crew:prev?prev.crew:(role()==="crew"?S.me.name:""),wo:prev?prev.wo:(j?j.wo:""),notes:"",
     labor:prev?cp(prev.labor).map(L=>({pid:L.pid,name:L.name,role:L.role,st:L.st,ot:L.ot,dt:L.dt,pd:L.pd,lodge:L.lodge})):[],equip:prev?cp(prev.equip):[],subs:[],prefill:prev?{no:prev.no,date:prev.workDate}:null};}
-function openTeForm(id,presetJob){
+function openTeForm(id,presetJob,presetPole){
   if(id==null&&!can.newSheet()){canSave();return;}
   const src=id?S.docs.get(id):null;
   const act=jobs().filter(j=>isTeJob(j)&&(!j.archived||(src&&j.id===src.jobId)));
   if(!act.length){toast(can.setup()?"Set up a T&E job first: Add Job → Billing type: T&E.":"No T&E jobs are set up yet. Ask billing to add the job.",7000);return;}
   if(!teSets().length){toast(can.setup()?"Load the T&E pricing first (Rates tab).":"T&E pricing hasn't been loaded yet. Ask billing.",7000);return;}
-  let d=src?JSON.parse(JSON.stringify(src)):teBlank(presetJob&&act.some(j=>j.id===presetJob)?presetJob:(act.length===1?act[0].id:""));
+  let d=src?JSON.parse(JSON.stringify(src)):teBlank(presetJob&&act.some(j=>j.id===presetJob)?presetJob:(act.length===1?act[0].id:""),presetPole);
   d.labor=d.labor||[];d.equip=d.equip||[];d.subs=d.subs||[];
   const showSubs=can.seePrice();let scanFile=null;
   const body='<fieldset><legend>Timesheet</legend>'+
     '<label class="f" for="tf-date">Date<input type="date" id="tf-date" value="'+esc(d.workDate)+'"></label>'+
     '<label class="f" for="tf-crew">Crew lead<input id="tf-crew" value="'+esc(d.crew)+'"></label>'+
     '<label class="f" for="tf-wo">Work order #<input id="tf-wo" value="'+esc(d.wo)+'"></label>'+
-    '<label class="f wide" for="tf-job">Job<select id="tf-job"><option value="">Select a T&amp;E job…</option>'+act.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===d.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select></label></fieldset>"+
+    '<label class="f wide" for="tf-job">Job<select id="tf-job"><option value="">Select a T&amp;E job…</option>'+act.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===d.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select></label>"+
+    '<label class="f wide" for="tf-pq">Location — search street, pole # or ticket<input id="tf-pq" type="search" autocomplete="off" placeholder="e.g. Bent St, P43, PT4382921"></label>'+
+    '<div class="wide polepick" id="tf-poles" role="listbox" aria-label="Locations on the job"></div>'+
+    '<label class="f chk wide" for="tf-done"><input type="checkbox" id="tf-done"'+(d.locComplete?" checked":"")+'> <b>Location complete</b> — all work at this location is finished</label></fieldset>'+
     '<div id="tf-pre"></div>'+
     '<div><div class="sec-h">Crew <span class="sub" id="tf-hrs"></span></div><p class="sub" style="margin:-4px 0 8px">One row per person: classification and hours by type. Tick per diem and lodging where they apply.</p><div id="tf-lab" class="te-rows"></div><div class="row-inline" style="margin-top:8px"><button class="btn" type="button" id="tf-add-l">+ Add person</button><button class="btn" type="button" id="tf-fill8">Set everyone to 8 ST</button></div></div>'+
     '<div><div class="sec-h">Equipment</div><p class="sub" style="margin:-4px 0 8px">Bill each piece by hours, days or months.</p><div id="tf-eq" class="te-rows"></div><button class="btn" type="button" id="tf-add-e" style="margin-top:8px">+ Add equipment</button></div>'+
     (showSubs?'<div><div class="sec-h">Subcontractors</div><p class="sub" style="margin:-4px 0 8px">Cost before markup, in USD. The markup from the Rates tab is added on the invoice.</p><div id="tf-sub" class="te-rows"></div><button class="btn" type="button" id="tf-add-s" style="margin-top:8px">+ Add subcontractor</button></div>':"")+
+    '<div><div class="sec-h">Photos of the location</div><p class="sub" id="tf-phreq" style="margin:-4px 0 8px"></p>'+photoSlotsHtml("tf",false)+"</div>"+
     '<div><div class="sec-h">Paper timesheet (optional)</div><label class="f" for="tf-scan">Attach a photo or PDF of the signed paper sheet<input type="file" id="tf-scan" accept="application/pdf,image/*"></label>'+(d.scan?'<p class="sub" style="margin:4px 0 0">Attached: '+esc(d.scan.name)+" (choose a file to replace it)</p>":"")+"</div>"+
     '<label class="f wide" for="tf-notes">Notes<textarea id="tf-notes">'+esc(d.notes)+"</textarea></label>"+
     (can.seePrice()?'<div class="okbox" id="tf-tot"></div>':"");
   const m=modal(id?"Edit "+d.no:"T&E daily timesheet",body,'<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="tf-save">'+(id?(d.status===ST.RET?"Save &amp; resubmit":"Save changes"):"Submit to CM")+"</button>","wide");
-  const jsel=m.querySelector("#tf-job"),dsel=m.querySelector("#tf-date");
+  const jsel=m.querySelector("#tf-job"),dsel=m.querySelector("#tf-date"),done=m.querySelector("#tf-done"),pq=m.querySelector("#tf-pq"),pbox=m.querySelector("#tf-poles");
+  const slots={before:{meta:d.photos&&d.photos.before||null},after:{meta:d.photos&&d.photos.after||null}};bindPhotoSlots(m,slots);
+  let selPole=d.poleId||"";
+  const needs=()=>{const first=!selPole||!teLocSheets(jsel.value,selPole,id).length;return{before:first,after:done.checked};};
+  function phreq(){const n=needs(),f=needPhotos();m.querySelector("#tf-phreq").textContent="Before photo: "+(n.before?(f?"required":"needed")+" (first timesheet at this location)":"optional")+" · After photo: "+(n.after?(f?"required":"needed")+" (location marked complete)":"optional until Location complete is ticked")+(f?"":" · required when a General Foreman submits");}
+  function drawPoles(){const j=jobById(jsel.value);const ps=(j&&j.poles)||[];const q=pq.value.trim().toLowerCase();
+    let list=ps.filter(p=>!q||[p.street,p.esPole,p.vzPole,p.ticket,p.town].join(" ").toLowerCase().indexOf(q)>=0);const sp=ps.find(p=>p.id===selPole);if(sp&&list.indexOf(sp)<0)list=[sp].concat(list);const lim=q?60:8;
+    pbox.innerHTML=j?(ps.length?list.slice(0,lim).map(p=>{const stt=teLocStatus(teLocSheets(j.id,p.id,id));return'<button type="button" class="pp'+(p.id===selPole?" on":"")+'" data-p="'+esc(p.id)+'" role="option" aria-selected="'+(p.id===selPole)+'"><b>'+esc(p.street)+"</b> · "+esc(p.esPole)+'<span class="sub"> '+esc(p.ticket)+"</span>"+(stt[0]!=="Not started"?' <span class="chip '+stt[1]+'">'+esc(stt[0])+"</span>":"")+"</button>";}).join("")+(list.length>lim?'<span class="sub">Showing '+lim+" of "+list.length+" — type to narrow</span>":""):'<span class="sub">This job has no locations yet. Billing adds them with + Add locations.</span>'):'<span class="sub">Pick the job first.</span>';
+    pbox.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{selPole=b.dataset.p;drawPoles();phreq();});}
+  pq.oninput=drawPoles;done.onchange=phreq;drawPoles();phreq();
   const rosterList=roster();const dl='<datalist id="tf-people">'+rosterList.map(p=>"<option>"+esc(p.name)+"</option>").join("")+"</datalist>";
   function pre(){const p=m.querySelector("#tf-pre");p.innerHTML=!id&&d.prefill?'<div class="note" style="margin:0">Pre-filled from '+esc(d.prefill.no)+" ("+esc(fmtD(d.prefill.date))+"). Check names, hours and equipment for today.</div>":"";}
   function tot(){const h=m.querySelector("#tf-hrs");h.textContent=d.labor.length?"· "+d.labor.length+" people · "+fmtN(teHours(d))+" hrs":"";
@@ -229,7 +247,7 @@ function openTeForm(id,presetJob){
     box.innerHTML=d.subs.length?d.subs.map((s,i)=>'<div class="te-row te-sub" data-i="'+i+'"><label class="f">Subcontractor<input data-k="vendor" value="'+esc(s.vendor)+'"></label><label class="f ds">Description<input data-k="desc" value="'+esc(s.desc)+'"></label><label class="f">Cost (USD)<input data-k="amount" type="number" inputmode="decimal" step="0.01" min="0" value="'+esc(s.amount==null?"":s.amount)+'"></label><button class="btn sm danger" type="button" data-rm aria-label="Remove subcontractor">✕</button></div>').join(""):'<p class="sub" style="margin:0">None.</p>';
     box.querySelectorAll(".te-row").forEach(row=>{const s=d.subs[+row.dataset.i];row.querySelectorAll("[data-k]").forEach(inp=>{inp.oninput=()=>{s[inp.dataset.k]=inp.value;tot();};});row.querySelector("[data-rm]").onclick=()=>{d.subs.splice(+row.dataset.i,1);drawSub();};});tot();}
   pre();drawLab();drawEq();drawSub();
-  jsel.onchange=()=>{if(!id){const keep={workDate:dsel.value};d=Object.assign(teBlank(jsel.value),keep);m.querySelector("#tf-crew").value=d.crew;m.querySelector("#tf-wo").value=d.wo;pre();drawLab();drawEq();drawSub();}else{d.jobId=jsel.value;tot();}};
+  jsel.onchange=()=>{selPole="";drawPoles();phreq();if(!id){const keep={workDate:dsel.value};d=Object.assign(teBlank(jsel.value),keep);m.querySelector("#tf-crew").value=d.crew;m.querySelector("#tf-wo").value=d.wo;pre();drawLab();drawEq();drawSub();}else{d.jobId=jsel.value;tot();}};
   dsel.onchange=tot;
   m.querySelector("#tf-add-l").onclick=()=>{d.labor.push({pid:"",name:"",role:"",st:"",ot:"",dt:"",pd:false,lodge:false});drawLab();const ins=m.querySelectorAll("#tf-lab input[data-k=name]");ins[ins.length-1].focus();};
   m.querySelector("#tf-fill8").onclick=()=>{d.labor.forEach(L=>{L.st=8;L.ot="";L.dt="";});drawLab();};
@@ -238,8 +256,8 @@ function openTeForm(id,presetJob){
   m.querySelector("#tf-scan").onchange=ev=>{scanFile=ev.target.files[0]||null;};
   m.querySelector("#tf-save").onclick=e=>busyRun(e.target,m,async()=>{
     const g=s=>m.querySelector(s).value.trim();
-    const patch={kind:"te",jobId:jsel.value,workDate:g("#tf-date"),crew:g("#tf-crew"),wo:g("#tf-wo"),notes:m.querySelector("#tf-notes").value.trim(),poleId:"",poleText:""};
-    if(!patch.jobId)throw new Error("Pick the job.");if(!patch.workDate)throw new Error("Enter the date.");if(!patch.crew)throw new Error("Enter the crew lead.");
+    const patch={kind:"te",jobId:jsel.value,workDate:g("#tf-date"),crew:g("#tf-crew"),wo:g("#tf-wo"),notes:m.querySelector("#tf-notes").value.trim(),poleId:selPole,poleText:"",locComplete:done.checked};
+    if(!patch.jobId)throw new Error("Pick the job.");if(!patch.poleId)throw new Error("Pick the location this time was spent on.");if(!patch.workDate)throw new Error("Enter the date.");if(!patch.crew)throw new Error("Enter the crew lead.");
     const hn=v=>{if(v===""||v==null)return 0;const n=Number(v);if(!isFinite(n)||n<0)throw new Error("Hours and quantities must be numbers of 0 or more.");return n;};
     const seen=new Set();const labor=[];
     for(const L of d.labor){const name=String(L.name||"").trim();const h={st:hn(L.st),ot:hn(L.ot),dt:hn(L.dt)};
@@ -252,12 +270,15 @@ function openTeForm(id,presetJob){
     const equip=[];for(const E of d.equip){if(!E.item&&(E.qty===""||E.qty==null))continue;if(!E.item)throw new Error("Pick the equipment for each equipment row.");const q=hn(E.qty);if(!q)throw new Error(E.item+": enter a quantity greater than 0.");equip.push({item:E.item,basis:E.basis||"hour",qty:q});}
     const subs=[];if(showSubs)for(const s of d.subs){const v=String(s.vendor||"").trim();if(!v&&(s.amount===""||s.amount==null))continue;if(!v)throw new Error("Enter the subcontractor's name.");const a=hn(s.amount);if(!a)throw new Error(v+": enter the cost.");subs.push({vendor:v,desc:String(s.desc||"").trim(),amount:a});}
     Object.assign(patch,{labor,equip,subs:showSubs?subs:(src&&src.subs)||[]});
+    const n=needs();const miss=[n.before&&!(slots.before.blob||slots.before.meta)?"before":"",n.after&&!(slots.after.blob||slots.after.meta)?"after":""].filter(Boolean);
+    if(needPhotos()&&miss.length)throw new Error("Add the "+miss.join(" and ")+" photo"+(miss.length>1?"s":"")+" before submitting ("+(n.before&&!slots.before.blob&&!slots.before.meta?"first timesheet at this location":"")+(miss.length>1?"; ":"")+(miss.includes("after")?"location marked complete":"")+").");
     if(!canSave())return;
+    if(slots.before.blob||slots.after.blob)e.target.textContent="Uploading photos…";patch.photos=await savePhotos(slots);
     if(scanFile){e.target.textContent="Uploading scan…";patch.scan=await storePackage(scanFile);}
     e.target.textContent="Saving…";
     const newPeople=labor.filter(L=>!L.pid);
     if(newPeople.length){await commitIndex(ix=>{ix.roster=ix.roster||[];newPeople.forEach(L=>{const ex=ix.roster.find(p=>p.name.toLowerCase()===L.name.toLowerCase());if(ex){L.pid=ex.id;return;}const p={id:newId("w-"),name:L.name,role:L.role,addedBy:S.me.name,addedAt:new Date().toISOString()};ix.roster.push(p);L.pid=p.id;});},"Workflow: add to crew roster");}
-    const sum="Crew "+labor.length+" · "+fmtN(teHours(patch))+" hrs · equipment "+equip.length+(subs.length?" · subs "+subs.length:"");
+    const sum=sheetPoleText(Object.assign({},patch,{kind:"te"}))+(patch.locComplete?" · LOCATION COMPLETE":"")+" · crew "+labor.length+" · "+fmtN(teHours(patch))+" hrs · equipment "+equip.length+(subs.length?" · subs "+subs.length:"");
     if(!id){patch.status=ST.SUB;patch.submittedAt=new Date().toISOString();
       const nid=await createDoc("sheet",patch,"Submitted T&E timesheet: "+sum);if(nid){closeOverlay();toast("Timesheet submitted to the CM");location.hash="sheet-"+nid;}}
     else{const resub=src.status===ST.RET;
@@ -268,7 +289,8 @@ function openTeForm(id,presetJob){
 
 /* ---------- T&E timesheet view ---------- */
 function teDetailsHtml(d){const j=jobById(d.jobId);
-  return dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("Work order #",esc(d.wo))+
+  const p=poleById(j,d.poleId);
+  return dl("Location",p?esc(p.esPole+" — "+p.street+(p.town?", "+p.town:"")):'<span class="late">No location</span>',true)+(p?dl("Ticket ID",esc(p.ticket)):"")+dl("Location complete",d.locComplete?'<span class="chip c-done">Yes — marked complete</span>':"No")+dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("Work order #",esc(d.wo))+
     dl("T&E pricing",teJobSet(j)?esc(teJobSet(j).name+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+j.teArea:"")):'<span class="late">Not set on the job</span>')+dl("Rate year",esc(yearOf(d.workDate)||""))+dl("Crew",esc(teSummary(d)))+
     dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
     (d.scan?dl("Paper timesheet",'<button class="btn sm" type="button" id="a-scan">'+esc(d.scan.name)+"</button>"):"")+(d.notes?dl("Notes",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"");}
@@ -283,55 +305,75 @@ function teBodyHtml(d){
   const rest=by("Per diem").concat(by("Lodging"),by("Subcontractor"));
   const other=priced&&rest.length?'<h2 class="sec">Per diem, lodging &amp; subcontractors</h2><div class="tablebox"><table class="static"><thead><tr><th>Item</th><th>Type</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+
     rest.map(l=>"<tr><td>"+esc(l.item)+"</td><td>"+esc(l.type)+'</td><td class="mono num">'+fmtN(l.qty)+'</td><td class="mono num">'+(l.rate==null?'<span class="late">Not set</span>':money(l.rate))+'</td><td class="mono num">'+(l.ext==null?"—":money(l.ext))+"</td></tr>").join("")+"</tbody></table></div>":"";
-  return(priced&&pr.errs.length?'<div class="banner bad"><b>Pricing check:</b> '+esc(pr.errs.join(" · "))+"</div>":"")+lab+eq+other+
+  return(priced&&pr.errs.length?'<div class="banner bad"><b>Pricing check:</b> '+esc(pr.errs.join(" · "))+"</div>":"")+lab+eq+other+'<h2 class="sec">Photos</h2>'+photosSectionHtml(d)+
     (priced?'<div class="okbox" style="margin-top:10px">Day total: <b class="mono">'+(pr.total==null?"Incomplete":money(pr.total))+'</b> <span class="sub">Calculated: Σ hours / qty × rate ('+esc(pr.label)+"), USD</span></div>":"");}
 
-/* ---------- T&E job page ---------- */
+/* ---------- T&E job page: locations, timesheets, CM sign-off ---------- */
 function renderTeJob(j){
   const ss=visibleSheets().filter(s=>s.jobId===j.id);const gfList=ss.filter(s=>s.status===ST.SUB).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no)));
-  if(!S.jobTab||S.jobTab==="locs")S.jobTab=canGfSign()&&gfList.length?"gf":"sheets";const tab=S.jobTab;
-  const by=st=>ss.filter(s=>s.status===st).length;const ok=ss.filter(isReady).length,inv=by(ST.INV);
+  if(!S.jobTab)S.jobTab=canGfSign()&&gfList.length?"gf":"locs";const tab=S.jobTab;
+  const by=st=>ss.filter(s=>s.status===st).length;const ok=ss.filter(isReady).length,inv=by(ST.INV);const locs=j.poles||[];
+  const all=sheets().filter(s=>isTe(s)&&s.jobId===j.id);const locSt=p=>teLocStatus(all.filter(s=>s.poleId===p.id));const nDone=locs.filter(p=>locSt(p)[0]==="Complete").length;
   let appr=0,apprOk=true;ss.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceTe(s).total;if(t==null)apprOk=false;else appr+=t;});
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
     '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+esc(j.teArea):"")+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+'</div></div><div class="acts">'+
       (can.newSheet()&&!j.archived?'<button class="btn primary" type="button" id="tj-new">+ New T&amp;E timesheet</button>':"")+'<button class="btn" type="button" id="tj-print">Print blank timesheet</button>'+
-      (can.setup()?'<button class="btn" type="button" id="tj-roster">Crew roster</button><button class="btn" type="button" id="tj-edit">Edit job</button>':"")+(role()!=="crew"?'<button class="btn" type="button" id="tj-csv">Export CSV</button>':"")+"</div></section>"+
+      (can.setup()?'<button class="btn" type="button" id="tj-add">+ Add locations</button><button class="btn" type="button" id="tj-roster">Crew roster</button><button class="btn" type="button" id="tj-edit">Edit job</button>':"")+(role()!=="crew"?'<button class="btn" type="button" id="tj-csv">Export CSV</button>':"")+"</div></section>"+
     (!teJobSet(j)&&role()!=="crew"?'<div class="banner">No T&amp;E pricing is picked for this job, so its timesheets can\'t be priced. Pick it with <b>Edit job</b>.</div>':(teJobSet(j)&&!teJobArea(j,teJobSet(j))&&role()!=="crew"?'<div class="banner">'+esc(teJobSet(j).name)+' has different labor rates by service area. Pick the service area with <b>Edit job</b>.</div>':""))+
     (role()!=="crew"&&((j.packages||[]).length||can.setup())?'<div class="pkgbar"><b>Job package</b>'+(j.packages||[]).map((pk,i)=>'<button class="btn sm" type="button" data-pk="'+i+'">'+esc(pk.name)+' <span class="sub">'+fmtSize(pk.size)+"</span></button>").join("")+((j.packages||[]).length?"":'<span class="sub">None uploaded</span>')+(can.setup()?'<button class="btn sm primary" type="button" id="tj-pkg">Upload package</button>':"")+"</div>":"")+
-    '<section class="tiles">'+tile("Timesheets",ss.length,ss.length?"Latest "+fmtD(ss.map(s=>s.workDate).filter(Boolean).sort().pop()||""):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"Timesheets to review",by(ST.SUB)>0)+tile("Ready to bill",ok,"Signed by the CM",false)+tile("Invoiced",inv,"On invoices",false)+(can.seePrice()?tile("Approved $",ok+inv?(apprOk?money(appr):"Check"):"$0.00","Ready + invoiced",false):"")+"</section>"+
-    '<div class="subtabs" role="tablist"><button role="tab" type="button" id="t-sheets" aria-selected="'+(tab==="sheets")+'">Timesheets ('+ss.length+")</button>"+(canGfSign()?'<button role="tab" type="button" id="t-gf" aria-selected="'+(tab==="gf")+'">CM sign-off ('+gfList.length+")</button>":"")+'</div><div id="jbody"></div>';
+    '<section class="tiles">'+tile("Locations complete",nDone+" / "+locs.length,locs.filter(p=>locSt(p)[0]!=="Not started").length+" started",false)+tile("Awaiting CM signature",by(ST.SUB),"Timesheets to review",by(ST.SUB)>0)+tile("Ready to bill",ok,"Signed by the CM",false)+tile("Invoiced",inv,"On invoices",false)+(can.seePrice()?tile("Approved $",ok+inv?(apprOk?money(appr):"Check"):"$0.00","Ready + invoiced",false):"")+"</section>"+
+    '<div class="subtabs" role="tablist"><button role="tab" type="button" id="t-locs" aria-selected="'+(tab==="locs")+'">Locations ('+locs.length+')</button><button role="tab" type="button" id="t-sheets" aria-selected="'+(tab==="sheets")+'">Timesheets ('+ss.length+")</button>"+(canGfSign()?'<button role="tab" type="button" id="t-gf" aria-selected="'+(tab==="gf")+'">CM sign-off ('+gfList.length+")</button>":"")+'</div><div id="jbody"></div>';
   const on=(i,fn)=>{const b=document.getElementById(i);if(b)b.onclick=fn;};
-  on("t-sheets",()=>{S.jobTab="sheets";renderJob();});on("t-gf",()=>{S.jobTab="gf";renderJob();});
-  on("tj-new",()=>openTeForm(null,j.id));on("tj-print",()=>printTeSheet(j));on("tj-roster",openRoster);on("tj-edit",()=>{location.hash="jobedit-"+j.id;});on("tj-pkg",()=>openAddLocations(j.id,true));
+  on("t-locs",()=>{S.jobTab="locs";renderJob();});on("t-sheets",()=>{S.jobTab="sheets";renderJob();});on("t-gf",()=>{S.jobTab="gf";renderJob();});
+  on("tj-new",()=>openTeForm(null,j.id));on("tj-print",()=>printTeSheet(j,null));on("tj-add",()=>openAddLocations(j.id));on("tj-roster",openRoster);on("tj-edit",()=>{location.hash="jobedit-"+j.id;});on("tj-pkg",()=>openAddLocations(j.id,true));
   main.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>openPackage(j.packages[+b.dataset.pk],b));
-  on("tj-csv",()=>{const head=["Timesheet #","Work date","Crew lead","Name","Classification","ST hrs","OT hrs","DT hrs","Per diem","Lodging","Status","Invoice #"];
-    const L=[head];ss.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))).forEach(s=>(s.labor||[]).forEach(p=>L.push([s.no,fmtD(s.workDate),s.crew,p.name,p.role,p.st||0,p.ot||0,p.dt||0,p.pd?"Y":"",p.lodge?"Y":"",ST_LABEL[s.status]||s.status,s.invoiceNo||""])));
+  on("tj-csv",()=>{const head=["Timesheet #","Work date","Location","Ticket ID","Location complete","Crew lead","Name","Classification","ST hrs","OT hrs","DT hrs","Per diem","Lodging","Status","Invoice #"];
+    const L=[head];ss.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))).forEach(s=>{const p=poleById(j,s.poleId);(s.labor||[]).forEach(x=>L.push([s.no,fmtD(s.workDate),sheetPoleText(s),p?p.ticket:"",s.locComplete?"Y":"",s.crew,x.name,x.role,x.st||0,x.ot||0,x.dt||0,x.pd?"Y":"",x.lodge?"Y":"",ST_LABEL[s.status]||s.status,s.invoiceNo||""]));});
     download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"T&E timesheets - "+j.name+".csv");});
   const box=document.getElementById("jbody");
   if(tab==="gf"){if(!canGfSign())box.innerHTML='<p class="sub">Only a Construction Manager or admin can sign.</p>';else gfTable(box,gfList,false);return;}
-  const rows=ss.slice().sort((a,b)=>ST_ORDER.indexOf(a.status)-ST_ORDER.indexOf(b.status)||String(b.workDate).localeCompare(String(a.workDate)));
-  box.innerHTML='<div class="tablebox"><table><thead><tr><th class="nosort">Timesheet #</th><th class="nosort">Work date</th><th class="nosort">Crew lead</th><th class="nosort">Crew</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th></tr></thead><tbody id="tj-sh"></tbody></table></div>';
-  const tb=document.getElementById("tj-sh");
-  tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceTe(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+"</td><td>"+crewCell(s)+'</td><td class="wrapc">'+esc(teSummary(s))+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="6"><div class="empty"><b>No timesheets yet</b>'+(can.newSheet()?"Use + New T&amp;E timesheet to log the crew and equipment for a day.":"")+"</div></td></tr>";
-  bindRows(tb,id=>location.hash="sheet-"+id);}
+  if(tab==="sheets"){
+    const rows=ss.slice().sort((a,b)=>ST_ORDER.indexOf(a.status)-ST_ORDER.indexOf(b.status)||String(b.workDate).localeCompare(String(a.workDate)));
+    box.innerHTML='<div class="tablebox"><table><thead><tr><th class="nosort">Timesheet #</th><th class="nosort">Work date</th><th class="nosort">Location</th><th class="nosort">Crew lead</th><th class="nosort">Crew</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th></tr></thead><tbody id="tj-sh"></tbody></table></div>';
+    const tb=document.getElementById("tj-sh");
+    tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceTe(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+'</td><td class="wrapc">'+esc(sheetPoleText(s))+(s.locComplete?' <span class="chip c-done">Complete</span>':"")+"</td><td>"+crewCell(s)+'</td><td class="wrapc">'+esc(teSummary(s))+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="7"><div class="empty"><b>No timesheets yet</b>'+(can.newSheet()?"Pick a location on the Locations tab and use Log time.":"")+"</div></td></tr>";
+    bindRows(tb,id=>location.hash="sheet-"+id);return;}
+  const q=S.pf.q||"",stf=S.pf.st||"";
+  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","In progress","Returned to field","Complete — awaiting CM","Complete"].map(x=>"<option"+(x===stf?" selected":"")+">"+x+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">Status</th><th class="nosort">Timesheets</th><th class="nosort num">Labor hrs</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Photos</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
+  const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
+  function fill(){const qq=(S.pf.q||"").trim().toLowerCase();
+    const rows=locs.map(p=>{const sh=ss.filter(s=>s.poleId===p.id);const stt=teLocStatus(all.filter(s=>s.poleId===p.id));const ap=sh.filter(s=>isReady(s)||s.status===ST.INV).map(priceTe);const amt=ap.some(x=>x.total==null)?null:ap.reduce((a,x)=>a+x.total,0);
+      const hasB=sh.some(s=>s.photos&&s.photos.before),hasA=sh.some(s=>s.photos&&s.photos.after);return{p,sh,stt,amt,nap:ap.length,hrs:sh.reduce((a,s)=>a+teHours(s),0),hasB,hasA};})
+      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||r.stt[0]===S.pf.st));
+    document.getElementById("pl-count").textContent=rows.length+" of "+locs.length+" locations";
+    const tb=document.getElementById("pl-body");
+    tb.innerHTML=rows.map(r=>{const p=r.p;return'<tr tabindex="0" data-id="'+esc(p.id)+'"><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+'</span></td><td class="mono">'+r.sh.length+'</td><td class="mono num">'+(r.hrs?fmtN(r.hrs):"")+"</td>"+
+      (can.seePrice()?'<td class="mono num">'+(r.nap?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+"<td>"+(r.sh.length?(r.hasB?'<span class="chip c-done">Before ✓</span>':'<span class="chip c-bad">No before</span>')+" "+(r.hasA?'<span class="chip c-done">After ✓</span>':(r.stt[0].indexOf("Complete")===0?'<span class="chip c-bad">No after</span>':"")):"")+"</td>"+
+      '<td style="white-space:nowrap">'+(can.newSheet()&&!j.archived?'<button class="btn sm primary" type="button" data-log="'+esc(p.id)+'">Log time</button> ':"")+'<button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print timesheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="11"><div class="empty"><b>No locations</b>'+(locs.length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":"Billing adds the job's locations."))+"</div></td></tr>";
+    tb.querySelectorAll("[data-log]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();openTeForm(null,j.id,b.dataset.log);});
+    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printTeSheet(j,poleById(j,b.dataset.print));});
+    if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
+  fill();}
 
 /* ---------- printable blank T&E timesheet (crew and equipment pre-filled from the last timesheet) ---------- */
-function printTeSheet(j){
+function printTeSheet(j,pole){
   const prev=lastTe(j.id);const people=(prev&&prev.labor)||[];const eq=(prev&&prev.equip)||[];
   const NL=Math.max(14,people.length+3),NE=Math.max(7,eq.length+2);
   const box=(label,val,cls)=>'<div class="us-f '+(cls||"")+'"><span>'+esc(label)+'</span><div class="us-box">'+esc(val||"")+"</div></div>";
   const lab=Array.from({length:NL},(_,i)=>{const p=people[i];return"<tr><td>"+esc(p?p.name:"")+"</td><td>"+esc(p?p.role:"")+'</td><td class="q"></td><td class="q"></td><td class="q"></td><td class="q"></td><td class="q"></td></tr>';}).join("");
   const eqr=Array.from({length:NE},(_,i)=>{const e=eq[i];const b=e?(TE_BASIS.find(x=>x[0]===e.basis)||TE_BASIS[0])[1]:"";return"<tr><td>"+esc(e?e.item:"")+'</td><td class="q2">'+esc(b?"☐ Hrs ☐ Days ☐ Mo":"☐ Hrs ☐ Days ☐ Mo")+'</td><td class="q"></td></tr>';}).join("");
   const p=document.getElementById("print");
-  p.innerHTML='<div class="us"><section class="us-page te-page"><div class="us-top"><div><h1>T&amp;E DAILY TIMESHEET</h1><div class="sub" style="font-size:11px;margin-top:4px">Time &amp; equipment · one sheet per crew per day</div></div><div class="us-job"><img src="pg-logo.jpg" alt="P&amp;G Power Co."><b>'+esc(j.name)+"</b>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+"</span>":"")+"</div></div>"+
+  p.innerHTML='<div class="us"><section class="us-page te-page"><div class="us-top"><div><h1>T&amp;E DAILY TIMESHEET</h1><div class="sub" style="font-size:11px;margin-top:4px">Time &amp; equipment · one sheet per location per day · before photo on the first day, after photo when complete</div></div><div class="us-job"><img src="pg-logo.jpg" alt="P&amp;G Power Co."><b>'+esc(j.name)+"</b>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+"</span>":"")+"</div></div>"+
     '<div class="us-row">'+box("DATE","","w1")+box("CREW LEAD",prev?prev.crew:"","w2")+box("WORK ORDER #",prev?prev.wo:j.wo,"w1")+box("WEATHER / START–END TIME","","w2")+"</div>"+
+    '<div class="us-row">'+box("LOCATION — POLE # / STREET",pole?[pole.esPole,[pole.street,pole.town].filter(Boolean).join(", ")].filter(Boolean).join(" — "):"","w3")+box("TICKET ID",pole?pole.ticket:"","w1")+'<div class="us-f w1"><span>LOCATION COMPLETE?</span><div class="us-box">[&nbsp;&nbsp;] YES &nbsp; [&nbsp;&nbsp;] NO</div></div></div>'+
     '<table class="us-sec te-sec" style="margin-top:10px"><thead><tr><th>NAME</th><th>CLASSIFICATION</th><th class="q">ST HRS</th><th class="q">OT HRS</th><th class="q">DT HRS</th><th class="q">PER DIEM</th><th class="q">LODGING</th></tr></thead><tbody>'+lab+"</tbody></table>"+
     '<table class="us-sec te-sec"><thead><tr><th>EQUIPMENT</th><th class="q2">BILL BY</th><th class="q">QTY</th></tr></thead><tbody>'+eqr+"</tbody></table>"+
     '<table class="us-sec te-sec"><thead><tr><th>SUBCONTRACTOR</th><th>DESCRIPTION OF WORK</th></tr></thead><tbody><tr><td></td><td></td></tr><tr><td></td><td></td></tr></tbody></table>'+
     '<div class="us-notes"><b>NOTES / WORK PERFORMED:</b><div class="us-l"></div><div class="us-l"></div></div>'+
     '<div class="us-row" style="margin-top:12px">'+box("GENERAL FOREMAN SIGNATURE","","w2")+box("CM SIGNATURE","","w2")+box("DATE","","w1")+"</div>"+
     '<div class="us-foot">P&amp;G Power Co. · '+esc(j.name)+(prev?" · crew pre-filled from "+esc(prev.no)+" ("+esc(fmtD(prev.workDate))+")":"")+"</div></section></div>";
-  document.body.classList.add("printing");const pt=document.title;document.title="T&E Timesheet - "+j.name;
+  document.body.classList.add("printing");const pt=document.title;document.title="T&E Timesheet - "+j.name+(pole?" - "+pole.street+" "+pole.esPole:"");
   const done=()=>{document.body.classList.remove("printing");document.title=pt;window.removeEventListener("afterprint",done);};window.addEventListener("afterprint",done);
   const imgs=[...p.querySelectorAll("img")];Promise.all(imgs.map(im=>im.complete?1:new Promise(r=>{im.onload=im.onerror=r;}))).then(()=>setTimeout(()=>window.print(),150));}
 
@@ -339,23 +381,23 @@ function printTeSheet(j){
 const TE_CATS=["Labor","Equipment","Per diem","Lodging","Subcontractor"];
 function buildTeInvoice(sel){
   const errs=[];const days=sel.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no))).map(s=>{const pr=priceTe(s);if(s.hold&&s.hold.on)errs.push(s.no+" is on hold");pr.errs.forEach(e=>errs.push(s.no+": "+e));
-    return{sheetId:s.id,no:s.no,date:s.workDate,crew:s.crew,wo:s.wo||"",area:pr.area,year:pr.year,label:pr.label,gfBy:s.gfBy||"",gfAt:s.gfAt||"",lines:pr.lines,total:pr.lines.reduce((a,l)=>a+(l.ext||0),0)};});
+    return{sheetId:s.id,no:s.no,date:s.workDate,loc:sheetPoleText(s),locComplete:!!s.locComplete,crew:s.crew,wo:s.wo||"",area:pr.area,year:pr.year,label:pr.label,gfBy:s.gfBy||"",gfAt:s.gfAt||"",lines:pr.lines,total:pr.lines.reduce((a,l)=>a+(l.ext||0),0)};});
   const summary=TE_CATS.map(c=>({cat:c,amount:days.reduce((a,d)=>a+d.lines.filter(l=>l.cat===c).reduce((x,l)=>x+(l.ext||0),0),0)})).filter(x=>x.amount);
   const lab=new Map();days.forEach(d=>d.lines.filter(l=>l.cat==="Labor").forEach(l=>{const k=l.item+"|"+l.type+"|"+l.rate;const e=lab.get(k)||{item:l.item,type:l.type,rate:l.rate,qty:0,ext:0};e.qty+=l.qty;e.ext+=l.ext||0;lab.set(k,e);}));
   const eqm=new Map();days.forEach(d=>d.lines.filter(l=>l.cat==="Equipment").forEach(l=>{const k=l.item+"|"+l.type+"|"+l.rate;const e=eqm.get(k)||{item:l.item,type:l.type,rate:l.rate,qty:0,ext:0};e.qty+=l.qty;e.ext+=l.ext||0;eqm.set(k,e);}));
   const dates=days.map(d=>d.date).filter(Boolean).sort();
   return{kind:"te",days,summary,labor:[...lab.values()],equipment:[...eqm.values()],poles:[],errs:[...new Set(errs)],total:cents(days.reduce((a,d)=>a+d.total,0)),period:dates.length?fmtD(dates[0])+(dates[dates.length-1]!==dates[0]?" – "+fmtD(dates[dates.length-1]):""):""};}
 function teInvPreviewHtml(b){
-  return'<div class="tablebox"><table class="static"><thead><tr><th>Date</th><th>Timesheet</th><th>Crew lead</th><th class="num">Labor hrs</th><th class="num">Amount</th></tr></thead><tbody>'+
-    (b.days.map(d=>"<tr><td>"+esc(fmtD(d.date))+'</td><td class="mono">'+esc(d.no)+"</td><td>"+esc(d.crew)+'</td><td class="mono num">'+fmtN(d.lines.filter(l=>l.cat==="Labor").reduce((a,l)=>a+l.qty,0))+'</td><td class="mono num">'+money(d.total)+"</td></tr>").join("")||'<tr><td colspan="5" class="sub">Select at least one timesheet.</td></tr>')+
-    '</tbody><tfoot><tr><td colspan="4" class="num"><b>Total (USD) · '+b.days.length+" day"+(b.days.length===1?"":"s")+'</b></td><td class="mono num"><b>'+(b.errs.length?"—":money(b.total))+"</b></td></tr></tfoot></table></div>";}
+  return'<div class="tablebox"><table class="static"><thead><tr><th>Date</th><th>Timesheet</th><th>Location</th><th>Crew lead</th><th class="num">Labor hrs</th><th class="num">Amount</th></tr></thead><tbody>'+
+    (b.days.map(d=>"<tr><td>"+esc(fmtD(d.date))+'</td><td class="mono">'+esc(d.no)+"</td><td>"+esc(d.loc||"")+"</td><td>"+esc(d.crew)+'</td><td class="mono num">'+fmtN(d.lines.filter(l=>l.cat==="Labor").reduce((a,l)=>a+l.qty,0))+'</td><td class="mono num">'+money(d.total)+"</td></tr>").join("")||'<tr><td colspan="6" class="sub">Select at least one timesheet.</td></tr>')+
+    '</tbody><tfoot><tr><td colspan="5" class="num"><b>Total (USD) · '+b.days.length+" day"+(b.days.length===1?"":"s")+'</b></td><td class="mono num"><b>'+(b.errs.length?"—":money(b.total))+"</b></td></tr></tfoot></table></div>";}
 function teInvCoverHtml(i,pv){
   const T=pv?"pv-lines":"static";const n=pv?"num":"mono num";
   return'<table class="'+T+'"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead><tbody>'+i.summary.map(x=>"<tr><td>"+esc(x.cat)+'</td><td class="'+n+'">'+money(x.amount)+"</td></tr>").join("")+'</tbody><tfoot><tr><td class="num">TOTAL (USD)</td><td class="'+n+'">'+money(i.total)+"</td></tr></tfoot></table>"+
     (i.labor.length?(pv?'<h2 class="pv-h2" style="margin-top:14px">Labor by classification</h2>':'<h2 class="sec">Labor by classification</h2>')+'<table class="'+T+'"><thead><tr><th>Classification</th><th>Hour type</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+i.labor.map(x=>"<tr><td>"+esc(x.item)+"</td><td>"+esc(x.type)+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+"</tbody></table>":"")+
     (i.equipment.length?(pv?'<h2 class="pv-h2" style="margin-top:14px">Equipment</h2>':'<h2 class="sec">Equipment</h2>')+'<table class="'+T+'"><thead><tr><th>Equipment</th><th>Billed by</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+i.equipment.map(x=>"<tr><td>"+esc(x.item)+"</td><td>"+esc(x.type)+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+"</tbody></table>":"");}
 function teInvDayHtml(d,pv){const n=pv?"num":"mono num";
-  return'<table class="'+(pv?"pv-lines pv-pole":"static")+'"><thead><tr><th colspan="6">'+esc(fmtD(d.date)+"  |  "+d.no+"  |  CREW LEAD "+d.crew+(d.wo?"  |  WO #"+d.wo:"")+"  |  "+(d.label||(d.area+" "+d.year+" rates")).toUpperCase())+'</th></tr><tr class="subh"><td>Category</td><td>Description</td><td>Type</td><td class="num">Qty</td><td class="num">Rate</td><td class="num">Amount</td></tr></thead><tbody>'+
+  return'<table class="'+(pv?"pv-lines pv-pole":"static")+'"><thead><tr><th colspan="6">'+esc(fmtD(d.date)+"  |  "+d.no+(d.loc?"  |  "+d.loc+(d.locComplete?" (COMPLETE)":""):"")+"  |  CREW LEAD "+d.crew+(d.wo?"  |  WO #"+d.wo:"")+"  |  "+(d.label||(d.area+" "+d.year+" rates")).toUpperCase())+'</th></tr><tr class="subh"><td>Category</td><td>Description</td><td>Type</td><td class="num">Qty</td><td class="num">Rate</td><td class="num">Amount</td></tr></thead><tbody>'+
     d.lines.map(l=>"<tr><td>"+esc(l.cat)+"</td><td>"+esc(l.item+(l.who?" — "+l.who:""))+"</td><td>"+esc(l.type)+'</td><td class="'+n+'">'+fmtN(l.qty)+'</td><td class="'+n+'">'+money(l.rate)+'</td><td class="'+n+'">'+money(l.ext)+"</td></tr>").join("")+
     '</tbody><tfoot><tr><td colspan="5">'+esc(fmtD(d.date)+" DAY TOTAL")+(d.gfBy?' <span style="font-weight:400;font-size:10.5px">· CM signed: '+esc(d.gfBy)+"</span>":"")+'</td><td class="'+n+'">'+money(d.total)+"</td></tr></tfoot></table>";}
 function renderTeInvoice(i,id){
