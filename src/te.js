@@ -279,6 +279,48 @@ function openTeUncomplete(jobId,poleId){const j=jobById(jobId),p=poleById(j,pole
   confirmBox("Mark "+p.esPole+" not complete?","The before and after photos stay on record in the job history but the location goes back to not complete.","Mark not complete",async n=>{if(!canSave())return;
     await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===jobId);const pp=jj&&(jj.poles||[]).find(x=>x.id===poleId);if(!pp||!pp.teDone)return;(pp.teUndone=pp.teUndone||[]).push(Object.assign({},pp.teDone,{undoneAt:new Date().toISOString(),undoneBy:S.me.name,why:n}));delete pp.teDone;
       (jj.log=jj.log||[]).push({t:new Date().toISOString(),by:S.me.name,text:"Location "+pp.esPole+" ("+pp.street+") marked NOT complete: "+n});},"Workflow: location not complete");refresh();toast(p.esPole+" marked not complete");},{note:"Reason",noteReq:true,danger:true});}
+/* ---------- location timesheets (T&E): PDFs of the crew's timesheet per location, internal record only — never billed ---------- */
+const locTs=(j,pid)=>(j.teLocTs||[]).filter(t=>(t.poles||[]).includes(pid)).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.at).localeCompare(String(a.at)));
+const canLocTs=j=>W()&&["admin","gf","crew"].includes(role())&&!(j&&j.archived);
+function locTsCell(j,p){const L=locTs(j,p.id);const dates=[...new Set(L.map(t=>t.date))];
+  return'<button class="btn sm" type="button" data-lts="'+esc(p.id)+'">'+(L.length?"Timesheets ("+L.length+")":(canLocTs(j)?"+ Timesheet":"None"))+"</button>"+(dates.length?'<div class="sub" title="'+esc(dates.map(fmtD).join(", "))+'">Last '+esc(fmtD(dates[0]))+(dates.length>1?" · "+dates.length+" days":"")+"</div>":"");}
+function openLocTs(jobId,poleId){
+  const j=jobById(jobId),p=poleById(j,poleId);if(!j||!p)return;const L=locTs(j,poleId);const up=canLocTs(j);
+  const pname=x=>[x.esPole,x.street].filter(Boolean).join(" · ")||("#"+x.n);
+  const others=(j.poles||[]).filter(x=>x.id!==poleId).slice().sort((a,b)=>(a.n||0)-(b.n||0));
+  const list=L.length?'<div class="tablebox"><table><thead><tr><th class="nosort">Work date</th><th class="nosort">PDF</th><th class="nosort">Also covers</th><th class="nosort">Uploaded</th><th class="nosort"></th></tr></thead><tbody>'+
+    L.map(t=>{const also=(t.poles||[]).filter(x=>x!==poleId).map(x=>poleById(j,x)).filter(Boolean);const rm=up&&(t.byKey===S.myKey||canGfSign()||can.setup());
+      return"<tr><td><b>"+esc(fmtD(t.date))+'</b></td><td><button class="btn sm" type="button" data-open="'+esc(t.id)+'">'+esc(t.name)+'</button> <span class="sub">'+fmtSize(t.size||0)+'</span></td><td class="wrapc sub">'+(also.length?esc(also.map(pname).join(", ")):"—")+'</td><td class="sub">'+esc(t.by)+"<br>"+esc(fmtT(t.at))+"</td><td>"+(rm?'<button class="btn sm" type="button" data-rm="'+esc(t.id)+'">Remove</button>':"")+"</td></tr>";}).join("")+"</tbody></table></div>"
+    :'<p class="sub" style="margin:0">No timesheets uploaded for this location yet.</p>';
+  const form=up?'<h3 class="pv-h3" style="margin:14px 0 6px">Upload a timesheet</h3><p class="sub" style="margin:0 0 6px">Internal record of when this location was worked. It is not billed and does not change the weekly timesheets.</p>'+
+    '<div class="row-inline" style="gap:10px;flex-wrap:wrap;align-items:flex-end"><label class="f" for="lt-file" style="flex:2 1 260px">Timesheet PDF<input type="file" id="lt-file" accept="application/pdf,.pdf" multiple></label><label class="f" for="lt-date" style="flex:1 1 160px">Work date<input type="date" id="lt-date" max="'+todayStr()+'"></label></div>'+
+    (others.length?'<details id="lt-more" style="margin-top:8px"><summary>Same timesheet covers other locations? <span class="sub" id="lt-n">(none picked)</span></summary><input type="search" id="lt-q" placeholder="Filter street, pole #, ticket…" aria-label="Filter locations" style="width:100%;margin:6px 0;padding:6px 10px;border:1px solid var(--field);border-radius:4px"><div class="ulist" style="max-height:30vh;overflow:auto">'+
+      others.map(x=>'<label class="u" style="grid-template-columns:auto 1fr;cursor:pointer" data-hay="'+esc([x.street,x.esPole,x.ticket,x.town,x.n].join(" ").toLowerCase())+'"><input type="checkbox" data-also="'+esc(x.id)+'"><span><span class="mono sub">#'+esc(x.n)+"</span> <b>"+esc(x.street)+"</b> · "+esc(x.esPole)+(locTs(j,x.id).length?' <span class="sub">('+locTs(j,x.id).length+" on file)</span>":"")+"</span></label>").join("")+"</div></details>":""):"";
+  const m=modal("Location timesheets — "+pname(p),'<p class="sub" style="margin:0">'+esc([p.ticket?"Ticket "+p.ticket:"",p.town,p.woJob?"WO "+p.woJob:""].filter(Boolean).join(" · "))+"</p>"+list+form,
+    '<button class="btn" type="button" data-x>Close</button>'+(up?'<button class="btn primary" type="button" id="lt-save">Upload</button>':""),"wide");
+  m.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{const t=L.find(x=>x.id===b.dataset.open);if(t)openPackage(t,b);});
+  m.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{const t=L.find(x=>x.id===b.dataset.rm);if(!t)return;
+    confirmBox("Remove "+t.name+"?",((t.poles||[]).length>1?"It is removed from all "+t.poles.length+" locations it covers. ":"")+"The removal is kept in the job history.","Remove",async()=>{if(!canSave())return;
+      await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===jobId);if(!jj)return;const i=(jj.teLocTs||[]).findIndex(x=>x.id===t.id);if(i<0)return;const [o]=jj.teLocTs.splice(i,1);
+        (jj.teLocTsRemoved=jj.teLocTsRemoved||[]).push(Object.assign({},o,{removedAt:new Date().toISOString(),removedBy:S.me.name}));
+        (jj.log=jj.log||[]).push({t:new Date().toISOString(),by:S.me.name,text:"Location timesheet removed: "+o.name+" ("+o.date+")"});},"Workflow: location timesheet removed");
+      refresh();toast("Removed");openLocTs(jobId,poleId);},{danger:true});});
+  if(!up)return;
+  const boxes=[...m.querySelectorAll("[data-also]")];const cnt=m.querySelector("#lt-n");
+  boxes.forEach(b=>b.onchange=()=>{const n=boxes.filter(x=>x.checked).length;cnt.textContent=n?"("+n+" picked)":"(none picked)";});
+  const q=m.querySelector("#lt-q");if(q)q.oninput=()=>{const v=q.value.trim().toLowerCase();boxes.forEach(b=>{const l=b.closest("label");l.hidden=!!v&&l.dataset.hay.indexOf(v)<0;});};
+  m.querySelector("#lt-save").onclick=e=>busyRun(e.target,m,async()=>{
+    const files=[...m.querySelector("#lt-file").files];const date=m.querySelector("#lt-date").value;
+    if(!files.length)throw new Error("Pick the timesheet PDF.");
+    const bad=files.filter(f=>!/\.pdf$/i.test(f.name)&&f.type!=="application/pdf");if(bad.length)throw new Error(bad.map(f=>f.name).join(", ")+" is not a PDF.");
+    if(!date)throw new Error("Enter the work date.");if(date>todayStr())throw new Error("The work date can't be in the future.");
+    if(!canSave())return;
+    const poles=[poleId].concat(boxes.filter(b=>b.checked).map(b=>b.dataset.also));const recs=[];
+    for(let i=0;i<files.length;i++){e.target.textContent="Uploading "+(i+1)+" of "+files.length+"…";const meta=await storePackage(files[i]);recs.push(Object.assign({id:"lt-"+hexId(8),date,poles,byKey:S.myKey},meta));}
+    await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===jobId);if(!jj)throw new Error("This job was removed.");const live=new Set((jj.poles||[]).map(x=>x.id));
+      recs.forEach(r=>{r.poles=r.poles.filter(x=>live.has(x));});(jj.teLocTs=jj.teLocTs||[]).push(...recs);
+      (jj.log=jj.log||[]).push({t:new Date().toISOString(),by:S.me.name,text:"Location timesheet"+(recs.length>1?"s":"")+" uploaded for "+date+" ("+poles.length+" location"+(poles.length>1?"s":"")+"): "+recs.map(r=>r.name).join(", ")});},"Workflow: location timesheet");
+    refresh();toast(files.length+" timesheet"+(files.length>1?"s":"")+" saved to "+poles.length+" location"+(poles.length>1?"s":""),5000);openLocTs(jobId,poleId);},"Uploading…");}
 function openTePhotos(jobId,poleId){const j=jobById(jobId),p=poleById(j,poleId);if(!p||!p.teDone)return;const ph=p.teDone.photos||{};
   const mm=modal("Photos — "+p.esPole+" · "+p.street,'<div class="ph-grid">'+PHOTO_KINDS.map(([k,l])=>'<figure class="ph-fig"><figcaption><b>'+l+"</b></figcaption>"+(ph[k]?'<img class="ph-big" data-photo="'+esc(JSON.stringify(ph[k]))+'" alt="'+l+' photo">':'<div class="ph-frame"><span class="ph-empty">No '+l.toLowerCase()+" photo</span></div>")+"</figure>").join("")+'</div><p class="sub" style="margin:0">Marked complete by '+esc(p.teDone.by)+" · "+esc(fmtT(p.teDone.at))+(p.teDone.note?" · "+esc(p.teDone.note):"")+"</p>",'<button class="btn primary" type="button" data-x>Close</button>',"wide");fillPhotoImgs(mm);}
 
@@ -300,10 +342,10 @@ function renderTeJob(j){
   on("t-locs",()=>{S.jobTab="locs";renderJob();});on("t-sheets",()=>{S.jobTab="sheets";renderJob();});on("t-gf",()=>{S.jobTab="gf";renderJob();});
   on("tj-imp",()=>openTeWeekImport(j.id));on("tj-add",()=>openAddLocations(j.id));on("tj-roster",openRoster);on("tj-edit",()=>{location.hash="jobedit-"+j.id;});on("tj-pkg",()=>openAddLocations(j.id,true));
   main.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>openPackage(j.packages[+b.dataset.pk],b));
-  on("tj-csv",()=>{const L=[["Record","Type","Week start","Week end","Day","Date","Foreman","Name / equipment","Class","Unit #","ST hrs","OT hrs","DT hrs","Equipment hrs","Status","Invoice #","Shutdown","Shutdown date"]];
+  on("tj-csv",()=>{const L=[["Record","Type","Week start","Week end","Day","Date","Foreman","Name / equipment","Class","Unit #","ST hrs","OT hrs","DT hrs","Equipment hrs","Status","Invoice #","Shutdown","Shutdown date","Location timesheet dates"]];
     ss.slice().sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))).forEach(s=>{(s.days||[]).forEach((dt,i)=>{(s.labor||[]).forEach(x=>{const h=x.h&&x.h[i];if(h&&(h.st||h.ot||h.dt))L.push([s.no,"Labor",s.weekStart,s.weekEnd,TE_DAYS[i],dt,s.crew,x.name,x.role,"",h.st||0,h.ot||0,h.dt||0,"",ST_LABEL[s.status]||s.status,s.invoiceNo||""]);});
       (s.equip||[]).forEach(x=>{const q=Number(x.h&&x.h[i])||0;if(q)L.push([s.no,"Equipment",s.weekStart,s.weekEnd,TE_DAYS[i],dt,s.crew,x.desc+" → "+(x.items||[]).join(" + "),"",x.unitNo||"","","","",q,ST_LABEL[s.status]||s.status,s.invoiceNo||""]);});});});
-    locs.forEach(p=>L.push(["Location","Location",p.esPole,p.street,"","",p.ticket||"",p.teDone?"Complete":"Not complete",p.teDone?p.teDone.by:"",p.teDone?fmtD(p.teDone.at):"","","","","","","",sdOn(p)?"Yes":"",sdOn(p)?p.shutdown.date||"":""]));
+    locs.forEach(p=>L.push(["Location","Location",p.esPole,p.street,"","",p.ticket||"",p.teDone?"Complete":"Not complete",p.teDone?p.teDone.by:"",p.teDone?fmtD(p.teDone.at):"","","","","","","",sdOn(p)?"Yes":"",sdOn(p)?p.shutdown.date||"":"",[...new Set(locTs(j,p.id).map(t=>t.date))].sort().join(" ")]));
     download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"T&E - "+j.name+".csv");});
   const box=document.getElementById("jbody");
   if(tab==="gf"){if(!canGfSign())box.innerHTML='<p class="sub">Only a Construction Manager or admin can sign.</p>';else gfTable(box,gfList,false);return;}
@@ -315,15 +357,15 @@ function renderTeJob(j){
     bindRows(tb,id=>location.hash="sheet-"+id);return;}
   const stf=S.pf.st||"";
   box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(S.pf.q||"")+'"><select id="pl-st" aria-label="Status"><option value="">All</option><option'+(stf==="Complete"?" selected":"")+'>Complete</option><option'+(stf==="Not complete"?" selected":"")+'>Not complete</option><option'+(stf==="Shutdown"?" selected":"")+'>Shutdown</option></select><span class="count" id="pl-count"></span></div>'+
-    '<div class="tablebox"><table><thead><tr><th class="nosort">Complete</th><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">WO / Job #</th><th class="nosort">Completed</th><th class="nosort">Photos</th><th class="nosort">Shutdown</th></tr></thead><tbody id="pl-body"></tbody></table></div>';
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Complete</th><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">WO / Job #</th><th class="nosort">Completed</th><th class="nosort">Photos</th><th class="nosort">Location timesheets</th><th class="nosort">Shutdown</th></tr></thead><tbody id="pl-body"></tbody></table></div>';
   const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
   function fill(){const qq=(S.pf.q||"").trim().toLowerCase();
     const rows=locs.filter(p=>(!qq||[p.street,p.esPole,p.vzPole,p.ticket,p.town,p.woJob,p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(p):(S.pf.st==="Complete")===!!p.teDone)));
     document.getElementById("pl-count").textContent=rows.length+" of "+locs.length+" locations · "+nDone+" complete"+(sa.shut?" · "+sa.shut+" shutdown":"");
     const tb=document.getElementById("pl-body");const canTick=can.newSheet()&&!j.archived;
-    tb.innerHTML=rows.map(p=>'<tr data-id="'+esc(p.id)+'"><td><label class="te-chk" style="flex-direction:row;gap:8px;padding:0;font-size:13px"><input type="checkbox" data-done="'+esc(p.id)+'"'+(p.teDone?" checked":"")+(canTick?"":" disabled")+' aria-label="'+esc(p.esPole+" "+p.street)+' complete">'+(p.teDone?'<span class="chip c-done">Complete</span>':"")+'</label></td><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.woJob||"")+"</td><td>"+(p.teDone?esc(fmtD(p.teDone.at))+' <span class="sub">'+esc(p.teDone.by)+"</span>":"")+"</td><td>"+(p.teDone?'<button class="btn sm" type="button" data-ph="'+esc(p.id)+'">Before &amp; after</button>':"")+"</td><td>"+shutCell(j,p)+"</td></tr>").join("")||'<tr><td colspan="10"><div class="empty"><b>No locations</b>'+(locs.length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":"Billing adds the job's locations."))+"</div></td></tr>";
+    tb.innerHTML=rows.map(p=>'<tr data-id="'+esc(p.id)+'"><td><label class="te-chk" style="flex-direction:row;gap:8px;padding:0;font-size:13px"><input type="checkbox" data-done="'+esc(p.id)+'"'+(p.teDone?" checked":"")+(canTick?"":" disabled")+' aria-label="'+esc(p.esPole+" "+p.street)+' complete">'+(p.teDone?'<span class="chip c-done">Complete</span>':"")+'</label></td><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.woJob||"")+"</td><td>"+(p.teDone?esc(fmtD(p.teDone.at))+' <span class="sub">'+esc(p.teDone.by)+"</span>":"")+"</td><td>"+(p.teDone?'<button class="btn sm" type="button" data-ph="'+esc(p.id)+'">Before &amp; after</button>':"")+"</td><td>"+locTsCell(j,p)+"</td><td>"+shutCell(j,p)+"</td></tr>").join("")||'<tr><td colspan="11"><div class="empty"><b>No locations</b>'+(locs.length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":"Billing adds the job's locations."))+"</div></td></tr>";
     tb.querySelectorAll("[data-done]").forEach(cb=>cb.onchange=()=>{const pid=cb.dataset.done;cb.checked=!cb.checked;const p=poleById(j,pid);if(p.teDone)openTeUncomplete(j.id,pid);else openTeComplete(j.id,pid);});
-    tb.querySelectorAll("[data-ph]").forEach(b=>b.onclick=()=>openTePhotos(j.id,b.dataset.ph));bindShut(tb,j);}
+    tb.querySelectorAll("[data-ph]").forEach(b=>b.onclick=()=>openTePhotos(j.id,b.dataset.ph));tb.querySelectorAll("[data-lts]").forEach(b=>b.onclick=()=>openLocTs(j.id,b.dataset.lts));bindShut(tb,j);}
   fill();}
 
 /* ---------- upload the weekly time sheet workbook (.xlsx): one tab per week ---------- */
