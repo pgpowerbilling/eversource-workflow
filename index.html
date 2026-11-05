@@ -276,6 +276,9 @@ table.static thead th[colspan]{text-transform:none;letter-spacing:.01em;font-siz
 .pv-h2{font-size:14px;color:var(--navy);margin:0 0 8px;letter-spacing:.04em}
 .pv-break{break-before:page;page-break-before:always;height:0}
 .pv-pole{margin-bottom:10px;break-inside:avoid}
+.pv-h3{font-size:11.5px;margin:12px 0 6px;color:var(--navy);letter-spacing:.03em}
+.pv-hrs th,.pv-hrs td{font-size:9.5px;padding:3px 4px}
+.pv-hrs td:nth-child(n+3){white-space:nowrap}
 .pv-lines tr.subh td{background:#eef2fb;font-weight:700;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .pv-pole tfoot td{font-size:11.5px}
 .pv-title{text-align:right}
@@ -2437,8 +2440,8 @@ function renderTeInvoice(i,id){
   main.innerHTML='<a class="back" href="#invoices">← Invoices</a><section class="jobhead"><div><h1>Invoice '+esc(i.no)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+invChip(i.status)+"<span>"+esc(i.jobName)+"</span><span>"+esc(fmtD(i.date))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
     (tieOk?"":'<div class="banner bad">Day lines total '+money(chk)+" but the saved invoice total is "+money(i.total)+" (variance "+money(cents(chk-i.total))+"). Do not send until this is resolved.</div>")+
     '<section class="details">'+dl("Bill to",esc(i.customer))+dl("Terms",esc(i.terms))+dl("PO#",esc(i.po))+dl("Billing period",esc(i.period))+dl("Billing package",esc(i.pkg))+dl("Invoice total",'<b class="mono">'+money(i.total)+"</b>")+dl("Timesheets",esc(i.days.map(d=>d.no).join(", ")),true)+(i.sentAt?dl("Sent",esc(i.sentBy+" · "+fmtT(i.sentAt))):"")+"</section>"+
-    '<h2 class="sec">T&amp;E billing summary</h2><div class="tablebox">'+teInvCoverHtml(i,false)+"</div>"+
-    '<h2 class="sec">'+(i.days.length&&i.days[0].weekly?"Weekly":"Daily")+' detail</h2>'+i.days.map(d=>'<div class="tablebox" style="margin-bottom:10px">'+teInvDayHtml(d,false)+"</div>").join("")+'<h2 class="sec">History</h2>'+histHtml(i);
+    '<h2 class="sec">'+(teIsWeeklyInv(i)?"Breakdown of the invoice total":"T&amp;E billing summary")+'</h2><div class="tablebox">'+(teIsWeeklyInv(i)?teInvBreakdownHtml(i,false):teInvCoverHtml(i,false))+"</div>"+
+    (teIsWeeklyInv(i)?'<h2 class="sec">Daily breakdown — labor &amp; equipment hours</h2>'+i.days.map(d=>'<div style="margin-bottom:16px">'+teInvDailyHtml(d,false)+"</div>").join(""):'<h2 class="sec">Daily detail</h2>'+i.days.map(d=>'<div class="tablebox" style="margin-bottom:10px">'+teInvDayHtml(d,false)+"</div>").join(""))+'<h2 class="sec">History</h2>'+histHtml(i);
   document.getElementById("v-pdf").onclick=()=>printTeInvoice(i);
   const s=document.getElementById("v-sent");if(s)s.onclick=()=>confirmBox("Mark "+i.no+" as sent?","Record that this invoice was submitted. Its timesheets drop off the UBL.","Mark sent",async n=>{await commitDoc(id,x=>{x.status="Sent";x.sentAt=new Date().toISOString();x.sentBy=S.me.name;},"Marked sent"+(n?": "+n:""));},{note:"Note"});
   const v=document.getElementById("v-void");if(v)v.onclick=()=>confirmBox("Void invoice "+i.no+"?","Its timesheets go back to Ready to bill so they can be billed again. The voided invoice stays on record.","Void invoice",async n=>{
@@ -2448,7 +2451,10 @@ function renderTeInvoice(i,id){
 function printTeInvoice(i){
   const p=document.getElementById("print");
   const head='<div class="pv-head"><div><img src="pg-logo.jpg" alt="P&amp;G Power Co."><div class="pv-from">'+(i.from||[]).map(esc).join("<br>")+'</div></div><div class="pv-title"><h1>INVOICE</h1><table class="pv-meta"><tr><td>Invoice No.</td><td><b>'+esc(i.no)+"</b></td></tr><tr><td>Invoice Date</td><td>"+esc(fmtD(i.date))+"</td></tr>"+(i.terms?"<tr><td>Terms</td><td>"+esc(i.terms)+"</td></tr>":"")+"<tr><td>Bill To</td><td>"+esc(i.customer)+"</td></tr>"+(i.po?"<tr><td>PO#</td><td>"+esc(i.po)+"</td></tr>":"")+(i.period?"<tr><td>Billing Period</td><td>"+esc(i.period)+"</td></tr>":"")+'</table></div></div><div class="pv-stripe"></div>';
-  p.innerHTML='<div class="pv">'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+" — TIME &amp; EQUIPMENT BILLING SUMMARY"+(i.jobName?" · "+esc(i.jobName.toUpperCase()):"")+"</h2>"+teInvCoverHtml(i,true)+'<p class="pv-foot">'+(i.days.length&&i.days[0].weekly?"Weekly":"Daily")+' detail follows. Rates per '+esc([...new Set(i.days.map(d=>(d.label||"").split(" · ")[0]).filter(Boolean))].join(", ")||"the Eversource T&D MSA, Exhibit B")+'.</p>'+
+  const rateNote=esc([...new Set(i.days.map(d=>(d.label||"").split(" · ")[0]).filter(Boolean))].join(", ")||"the Eversource T&D MSA, Exhibit B");
+  if(teIsWeeklyInv(i)){p.innerHTML='<div class="pv">'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+" — TIME &amp; EQUIPMENT INVOICE"+(i.jobName?" · "+esc(i.jobName.toUpperCase()):"")+'</h2><h3 class="pv-h3">BREAKDOWN OF THE INVOICE TOTAL</h3>'+teInvBreakdownHtml(i,true)+'<p class="pv-foot">Daily labor and equipment hours follow. Rates per '+rateNote+'.</p>'+
+    '<div class="pv-break"></div>'+head+'<h2 class="pv-h2">DAILY BREAKDOWN — LABOR &amp; EQUIPMENT HOURS</h2><p class="pv-foot" style="margin:0 0 6px">Labor cells show straight-time hours, with overtime (OT) and double time (DT) added where worked.</p>'+i.days.map(d=>teInvDailyHtml(d,true)).join("")+"</div>";}
+  else p.innerHTML='<div class="pv">'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+" — TIME &amp; EQUIPMENT BILLING SUMMARY"+(i.jobName?" · "+esc(i.jobName.toUpperCase()):"")+"</h2>"+teInvCoverHtml(i,true)+'<p class="pv-foot">'+(i.days.length&&i.days[0].weekly?"Weekly":"Daily")+' detail follows. Rates per '+esc([...new Set(i.days.map(d=>(d.label||"").split(" · ")[0]).filter(Boolean))].join(", ")||"the Eversource T&D MSA, Exhibit B")+'.</p>'+
     '<div class="pv-break"></div>'+head+'<h2 class="pv-h2">'+(i.days.length&&i.days[0].weekly?"WEEKLY DETAIL":"DAILY DETAIL")+'</h2>'+i.days.map(d=>teInvDayHtml(d,true)).join("")+'<table class="pv-lines"><tfoot><tr><td class="num">INVOICE TOTAL (USD)</td><td class="num" style="width:140px">'+money(i.total)+"</td></tr></tfoot></table></div>";
   document.body.classList.add("printing");const prev=document.title;document.title="P&G T&E Invoice "+i.no;
   const done=()=>{document.body.classList.remove("printing");document.title=prev;window.removeEventListener("afterprint",done);};window.addEventListener("afterprint",done);setTimeout(()=>window.print(),200);}
@@ -2545,6 +2551,49 @@ function payTplSection(host){const tp=payTpl();const ed=canRates()&&S.canWrite;
     let P=null,f=null;m.querySelector("#pt-file").onchange=async ev=>{f=ev.target.files[0];if(!f)return;const pv=m.querySelector("#pt-prev");try{P=await parsePayTemplate(await f.arrayBuffer());pv.innerHTML='<div class="okbox">Pay tab "'+esc(P.tab)+'" · '+P.scales.length+" pay classes · rows "+P.layout.firstRow+"–"+P.layout.lastRow+"</div>"+(P.fixNotes.length?'<div class="banner"><b>Fixed on every published pay sheet:</b><br>'+P.fixNotes.map(esc).join("<br>")+"</div>":"");m.querySelector("#pt-save").disabled=false;}catch(e){P=null;pv.innerHTML='<div class="err">'+esc(errText(e))+"</div>";}};
     m.querySelector("#pt-save").onclick=e=>busyRun(e.target,m,async()=>{if(!P||!canSave())return;const meta=await storePackage(f);const book=await TMPL.tables(await f.arrayBuffer());const a=await book.get(P.tab);
       await commitIndex(ix=>{ix.payTpl=Object.assign({file:meta.file,name:f.name,at:new Date().toISOString(),by:S.me.name,title:String(a[0]&&a[0][0]||"")},P);},"Workflow: pay sheet template");closeOverlay();refresh();toast("Pay sheet template saved");});};}
+
+/* ---------- T&E invoice layout (weekly timesheets): 1) breakdown of the invoice total, 2) daily labor & equipment hours ---------- */
+const teIsWeeklyInv=i=>!!(i.days&&i.days.length&&i.days[0].weekly);
+function teInvAll(i){return i.days.flatMap(d=>d.lines||[]);}
+function teInvBreakdownHtml(i,pv){
+  const n=pv?"num":"mono num",T=pv?"pv-lines":"static";const L=teInvAll(i);const sum=(arr,k)=>arr.reduce((a,l)=>a+(Number(l[k])||0),0);
+  const lab=L.filter(l=>l.cat==="Labor"),eq=L.filter(l=>l.cat==="Equipment");
+  const rows=[];
+  TE_HRS.forEach(([,ab,lb])=>{const x=lab.filter(l=>l.type===ab);if(x.length)rows.push(["Labor",lb,fmtN(sum(x,"qty"))+" hrs",sum(x,"ext")]);});
+  const labT=sum(lab,"ext");
+  if(eq.length)rows.push(["Equipment","Equipment hours",fmtN(sum(eq,"qty"))+" hrs",sum(eq,"ext")]);
+  ["Per diem","Lodging"].forEach(c=>{const x=L.filter(l=>l.cat===c);if(x.length)rows.push([c,c==="Per diem"?"Person-days":"Person-nights",fmtN(sum(x,"qty")),sum(x,"ext")]);});
+  const sub=L.filter(l=>l.cat==="Subcontractor");if(sub.length){const c=sub.filter(l=>l.type==="Cost"),mk=sub.filter(l=>l.type==="Markup");rows.push(["Subcontractors","Cost",c.length+" item"+(c.length===1?"":"s"),sum(c,"ext")]);if(mk.length)rows.push(["Subcontractors","Markup","",sum(mk,"ext")]);}
+  const total=sum(L,"ext");const tie=cents(total)===cents(i.total);
+  const byCls=new Map();lab.forEach(l=>{const k=l.item+"|"+l.type+"|"+l.rate;const e=byCls.get(k)||{item:l.item,type:l.type,rate:l.rate,qty:0,ext:0,who:new Set()};e.qty+=l.qty;e.ext+=l.ext||0;e.who.add(l.who);byCls.set(k,e);});
+  const byEq=new Map();eq.forEach(l=>{const k=l.item+"|"+l.rate;const e=byEq.get(k)||{item:l.item,rate:l.rate,qty:0,ext:0,units:new Set()};e.qty+=l.qty;e.ext+=l.ext||0;if(l.who)e.units.add(l.who);byEq.set(k,e);});
+  const ord=t=>["ST","OT","DT"].indexOf(t);
+  const h2=t=>pv?'<h2 class="pv-h2" style="margin-top:14px">'+t+"</h2>":'<h2 class="sec">'+t+"</h2>";
+  return'<table class="'+T+'"><thead><tr><th>Category</th><th>Item</th><th class="num">Quantity</th><th class="num">Amount (USD)</th></tr></thead><tbody>'+
+    rows.map((r,k)=>"<tr><td>"+(k&&rows[k-1][0]===r[0]?"":"<b>"+esc(r[0])+"</b>")+"</td><td>"+esc(r[1])+'</td><td class="'+n+'">'+esc(r[2])+'</td><td class="'+n+'">'+money(r[3])+"</td></tr>"+(r[0]==="Labor"&&(!rows[k+1]||rows[k+1][0]!=="Labor")?'<tr class="subh"><td></td><td>Labor subtotal</td><td class="'+n+'">'+fmtN(sum(lab,"qty"))+' hrs</td><td class="'+n+'">'+money(labT)+"</td></tr>":"")).join("")+
+    '</tbody><tfoot><tr><td colspan="3" class="num">INVOICE TOTAL (USD)</td><td class="'+n+'">'+money(i.total)+"</td></tr></tfoot></table>"+
+    (tie?"":'<p class="late" style="margin:6px 0">The lines add to '+money(total)+", not the saved total "+money(i.total)+" (variance "+money(cents(total-i.total))+"). Do not send until resolved.</p>")+
+    (byCls.size?h2("Labor by classification")+'<table class="'+T+'"><thead><tr><th>Classification</th><th>Hour type</th><th class="num">People</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>'+
+      [...byCls.values()].sort((a,b)=>a.item.localeCompare(b.item)||ord(a.type)-ord(b.type)).map(x=>"<tr><td>"+esc(x.item)+"</td><td>"+esc(x.type)+'</td><td class="'+n+'">'+x.who.size+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+
+      '</tbody><tfoot><tr><td colspan="3" class="num">Labor total</td><td class="'+n+'">'+fmtN(sum(lab,"qty"))+'</td><td></td><td class="'+n+'">'+money(labT)+"</td></tr></tfoot></table>":"")+
+    (byEq.size?h2("Equipment by rate item")+'<table class="'+T+'"><thead><tr><th>Equipment</th><th class="num">Units</th><th class="num">Hours</th><th class="num">Hourly rate</th><th class="num">Amount</th></tr></thead><tbody>'+
+      [...byEq.values()].sort((a,b)=>a.item.localeCompare(b.item)).map(x=>"<tr><td>"+esc(x.item)+'</td><td class="'+n+'">'+(x.units.size||"")+'</td><td class="'+n+'">'+fmtN(x.qty)+'</td><td class="'+n+'">'+money(x.rate)+'</td><td class="'+n+'">'+money(x.ext)+"</td></tr>").join("")+
+      '</tbody><tfoot><tr><td colspan="2" class="num">Equipment total</td><td class="'+n+'">'+fmtN(sum(eq,"qty"))+'</td><td></td><td class="'+n+'">'+money(sum(eq,"ext"))+"</td></tr></tfoot></table>":"");}
+function teInvDailyHtml(d,pv){
+  const n=pv?"num":"mono num",T=pv?"pv-lines pv-hrs":"static";const days=Array.from({length:6},(_,k)=>addDays(d.date,k));const L=d.lines||[];
+  const hd=days.map((x,k)=>'<th class="num">'+TE_DAYS[k]+"<br>"+esc(fmtD(x).replace(/\/\d{4}$/,""))+"</th>").join("");
+  const people=[];L.filter(l=>l.cat==="Labor").forEach(l=>{let p=people.find(x=>x.who===l.who);if(!p){p={who:l.who,item:l.item,h:days.map(()=>({ST:0,OT:0,DT:0}))};people.push(p);}const k=days.indexOf(l.date);if(k>=0)p.h[k][l.type]+=l.qty;});
+  const cell=h=>{const t=[h.ST?fmtN(h.ST):"",h.OT?fmtN(h.OT)+" OT":"",h.DT?fmtN(h.DT)+" DT":""].filter(Boolean);return t.join(" + ");};
+  const tot=(p,k)=>p.h.reduce((a,h)=>a+h[k],0);const dayTot=k=>people.reduce((a,p)=>a+p.h[k].ST+p.h[k].OT+p.h[k].DT,0);
+  const eq=[];L.filter(l=>l.cat==="Equipment").forEach(l=>{let e=eq.find(x=>x.item===l.item);if(!e){e={item:l.item,units:new Set(),h:days.map(()=>0)};eq.push(e);}if(l.who)e.units.add(l.who);const k=days.indexOf(l.date);if(k>=0)e.h[k]+=l.qty;});
+  const title=esc("WEEK "+fmtD(d.date)+" – "+fmtD(d.end)+"  |  "+d.no+"  |  FOREMAN "+d.crew+(d.wo?"  |  WO #"+d.wo:""));
+  return(pv?'<div class="pv-pole"><h3 class="pv-h3">'+title+"</h3>":'<p class="sub" style="margin:4px 0 6px"><b>'+title+"</b></p>")+
+    '<div'+(pv?"":' class="tablebox"')+'><table class="'+T+'"><thead><tr><th>Labor — name</th><th>Classification</th>'+hd+'<th class="num">ST</th><th class="num">OT</th><th class="num">DT</th><th class="num">Total</th></tr></thead><tbody>'+
+    people.map(p=>"<tr><td>"+esc(p.who)+"</td><td>"+esc(p.item)+"</td>"+p.h.map(h=>'<td class="'+n+'">'+esc(cell(h))+"</td>").join("")+["ST","OT","DT"].map(k=>'<td class="'+n+'">'+(tot(p,k)?fmtN(tot(p,k)):"")+"</td>").join("")+'<td class="'+n+'"><b>'+fmtN(tot(p,"ST")+tot(p,"OT")+tot(p,"DT"))+"</b></td></tr>").join("")+
+    '</tbody><tfoot><tr><td colspan="2">Labor hours ('+people.length+" people)</td>"+days.map((x,k)=>'<td class="'+n+'">'+(dayTot(k)?fmtN(dayTot(k)):"")+"</td>").join("")+["ST","OT","DT"].map(k=>'<td class="'+n+'">'+fmtN(people.reduce((a,p)=>a+tot(p,k),0))+"</td>").join("")+'<td class="'+n+'">'+fmtN(people.reduce((a,p)=>a+tot(p,"ST")+tot(p,"OT")+tot(p,"DT"),0))+"</td></tr></tfoot></table></div>"+
+    (eq.length?'<div'+(pv?' style="margin-top:8px"':' class="tablebox" style="margin-top:8px"')+'><table class="'+T+'"><thead><tr><th>Equipment — rate item</th><th class="num">Units</th>'+hd+'<th class="num">Total hrs</th></tr></thead><tbody>'+
+      eq.map(e=>"<tr><td>"+esc(e.item)+'</td><td class="'+n+'">'+(e.units.size||"")+"</td>"+e.h.map(v=>'<td class="'+n+'">'+(v?fmtN(v):"")+"</td>").join("")+'<td class="'+n+'"><b>'+fmtN(e.h.reduce((a,v)=>a+v,0))+"</b></td></tr>").join("")+
+      '</tbody><tfoot><tr><td colspan="2">Equipment hours</td>'+days.map((x,k)=>'<td class="'+n+'">'+(eq.reduce((a,e)=>a+e.h[k],0)?fmtN(eq.reduce((a,e)=>a+e.h[k],0)):"")+"</td>").join("")+'<td class="'+n+'">'+fmtN(eq.reduce((a,e)=>a+e.h.reduce((x,v)=>x+v,0),0))+"</td></tr></tfoot></table></div>":"")+(pv?"</div>":"");}
 
 initLogin();
 window.__wf={S,priceSheet,buildInvoice,priceTe,sheets};
