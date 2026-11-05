@@ -107,19 +107,24 @@ const ghMsg=(st,what)=>st===401?"GitHub rejected the key (401: invalid or expire
   :st===403?"GitHub refused the "+what+" (403: the key doesn't have Contents read & write on "+R().repo+")."
   :st===404?"GitHub couldn't find the file or repository with this key (404)."
   :"GitHub "+what+" failed ("+st+").";
+/* network calls to GitHub retry twice on a dropped connection (firewalls / proxies / flaky Wi-Fi) and remember what failed */
+async function netFetch(url,opt,what){let last;for(let i=0;i<3;i++){try{return await fetch(url,opt);}catch(e){last=e;if(i<2)await new Promise(r=>setTimeout(r,i?2000:600));}}
+  const host=(/^https?:\/\/([^/]+)/.exec(url)||[])[1]||url;const d={at:new Date().toISOString(),what,host,method:(opt&&opt.method)||"GET",error:String(last&&last.message||last),online:navigator.onLine};
+  S.lastNetErr=d;try{console.warn("[Workflow] network error",d);}catch(x){}
+  const e=new Error("Could not reach "+host+" while trying to "+what+" ("+(d.online?"connection dropped or blocked — often a firewall, VPN or job-site Wi-Fi":"this device is offline")+"). This change was not saved; try again. If it keeps happening on this network, try another network or a phone hotspot.");e.net=true;throw e;}
 async function ghGet(p,tok){
-  const r=await fetch(api(p)+"?ref="+R().branch+"&t="+Date.now(),{headers:ghHdr(tok),cache:"no-store"});
+  const r=await netFetch(api(p)+"?ref="+R().branch+"&t="+Date.now(),{headers:ghHdr(tok),cache:"no-store"},"read "+p);
   if(r.status===404)return null;if(!r.ok)throw new Error(ghMsg(r.status,"read"));
   const meta=await r.json();let content=meta.content;
-  if(!content){const br=await fetch("https://api.github.com/repos/"+R().owner+"/"+R().repo+"/git/blobs/"+meta.sha,{headers:ghHdr(tok)});if(!br.ok)throw new Error(ghMsg(br.status,"read"));content=(await br.json()).content;}
+  if(!content){const br=await netFetch("https://api.github.com/repos/"+R().owner+"/"+R().repo+"/git/blobs/"+meta.sha,{headers:ghHdr(tok)},"read "+p);if(!br.ok)throw new Error(ghMsg(br.status,"read"));content=(await br.json()).content;}
   return{sha:meta.sha,text:td.decode(unb64(content))};}
-async function ghList(p){const r=await fetch(api(p)+"?ref="+R().branch+"&t="+Date.now(),{headers:ghHdr(),cache:"no-store"});if(r.status===404)return[];if(!r.ok)throw new Error(ghMsg(r.status,"read"));return r.json();}
+async function ghList(p){const r=await netFetch(api(p)+"?ref="+R().branch+"&t="+Date.now(),{headers:ghHdr(),cache:"no-store"},"list "+p);if(r.status===404)return[];if(!r.ok)throw new Error(ghMsg(r.status,"read"));return r.json();}
 async function ghPut(p,text,sha,message,tok){
   const body={message,content:b64(te.encode(text)),branch:R().branch};if(sha)body.sha=sha;
-  const r=await fetch(api(p),{method:"PUT",headers:ghHdr(tok),body:JSON.stringify(body)});
+  const r=await netFetch(api(p),{method:"PUT",headers:ghHdr(tok),body:JSON.stringify(body)},"save "+p);
   if(r.status===409||r.status===422){const e=new Error("conflict");e.conflict=true;throw e;}
   if(!r.ok)throw new Error(ghMsg(r.status,"save"));return(await r.json()).content.sha;}
-async function pagesGet(p){const r=await fetch(p+"?t="+Date.now(),{cache:"no-store"});if(!r.ok)throw new Error("Could not load "+p+" ("+r.status+")");return r.json();}
+async function pagesGet(p){const r=await netFetch(p+"?t="+Date.now(),{cache:"no-store"},"load "+p);if(!r.ok)throw new Error("Could not load "+p+" ("+r.status+")");return r.json();}
 function errText(e){const m=(e&&e.message)||String(e);return /failed to fetch|networkerror|load failed/i.test(m)?"Could not reach GitHub (network or firewall). Your change was not saved. Try again.":m;}
 function setBusy(d){S.busy=Math.max(0,S.busy+d);document.body.style.cursor=S.busy?"progress":"";}
 
