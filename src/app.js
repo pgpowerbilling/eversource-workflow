@@ -336,11 +336,11 @@ function route(){
   else if(h.indexOf("jobedit-")===0){S.view="jobedit";S.docId=h.slice(8);}
   else if(h.indexOf("job-")===0){const id=h.slice(4);if(S.view!=="job"||S.docId!==id){S.jobTab=null;S.pf={q:"",st:""};}S.view="job";S.docId=id;}
   else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets"].includes(h))S.view=h;else S.view="overview";
-  if(role()==="crew"&&S.view!=="sheet")S.view="sheets";  /* crews only see and fill out their own unit sheets */
+  if(role()==="crew"&&!["sheet","job"].includes(S.view))S.view="sheets";  /* General Foremen: their own sheets + job pages (no pricing) */
   if(S.view==="rates"&&!canRates())S.view="overview";
   if(["invoices","invoice"].includes(S.view)&&!can.seeInvoices())S.view="overview";
   if(S.view==="ubl"&&!canUbl())S.view="overview";
-  const nav=role()==="crew"?{sheet:"sheets"}[S.view]||"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob"}[S.view]||S.view;
+  const nav=role()==="crew"?"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob"}[S.view]||S.view;
   if(S.view!=="jobedit")S.jobEdit=null;
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});
   refresh();window.scrollTo(0,0);
@@ -379,6 +379,9 @@ function renderSheets(){
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
   main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
+    (crew?(()=>{const sx=sheets();const js=jobs().filter(j=>!j.archived&&!j.test);if(!js.length)return"";
+      return'<h2 class="sec">My jobs</h2><p class="sub" style="margin:-4px 0 8px">Open a job to mark locations Shutdown'+(js.some(isTeJob)?", upload weekly timesheets or mark T&amp;E locations complete":"")+'.</p><div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Shutdown</th></tr></thead><tbody id="my-jobs">'+
+        js.map(j=>{const st=jobStats(j,sx);return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||""].filter(Boolean).join(" · "))+'</div></td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+'</td><td>'+st.doneLocs+"/"+st.locs+'<div class="sub">'+esc(progSub(st))+"</div></td><td>"+(st.shut?'<span class="chip c-bad">'+st.shut+" shutdown</span>"+(st.shutNext?' <span class="sub">next '+esc(fmtD(st.shutNext))+"</span>":""):"")+"</td></tr>";}).join("")+"</tbody></table></div>";})():"")+
     '<h2 class="sec">Workflow</h2><section class="tiles">'+
     tile("Awaiting CM",cnt(ST.SUB),"Sheets to review",false)+tile("Returned to field",cnt(ST.RET),"Sent back for fixes",cnt(ST.RET)>0)+
     tile("Ready to bill",cnt(ST.OK)+cnt(ST.GF),"Signed by the CM",false)+tile("Invoiced",cnt(ST.INV),"On an invoice",false)+"</section>"+
@@ -386,6 +389,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
+  const mj=document.getElementById("my-jobs");if(mj)bindRows(mj,id=>location.hash="job-"+id);
   const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));
   const q=document.getElementById("f-q"),st=document.getElementById("f-st"),jb=document.getElementById("f-job");st.value=S.f.status;jb.value=S.f.job;
@@ -645,12 +649,35 @@ function drawUbl(){
 }
 
 /* ---------- overview (home) ---------- */
+/* ---------- location shutdown (on hold for a shutdown / scheduled day) ---------- */
+const sdOn=p=>!!(p&&p.shutdown&&p.shutdown.on);
+const canShutdown=j=>W()&&["admin","gf","crew"].includes(role())&&!(j&&j.archived);
+function locDone(j,p,mine){if(isTeJob(j))return!!p.teDone;const sh=mine.filter(s=>s.poleId===p.id);return!!(sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV));}
+function progPct(st){const a=st.locs?Math.round(st.doneLocs/st.locs*100):0;const den=st.locs-st.shut;const b=den>0?Math.round(st.doneLocs/den*100):(st.locs?100:0);return{a,b};}
+function progSub(st){const p=progPct(st);return p.a+"% with shutdowns"+(st.shut?" · "+p.b+"% without ("+st.shut+" shutdown)":"");}
+function shutTile(st){return tile("Shutdown",st.shut,st.shut?(st.shutNext?"Next scheduled "+fmtD(st.shutNext):"No dates set")+(st.shutNoDate&&st.shutNext?" · "+st.shutNoDate+" no date":""):"No locations on shutdown",false);}
+function shutCell(j,p){const on=sdOn(p);const ok=canShutdown(j);const d=on?p.shutdown.date||"":"";
+  return'<div class="sd-cell"><label class="sd-chk"><input type="checkbox" data-sd="'+esc(p.id)+'"'+(on?" checked":"")+(ok?"":" disabled")+' aria-label="Shutdown — '+esc([p.esPole,p.street].filter(Boolean).join(" "))+'"><span>'+(on?'<span class="chip c-bad">Shutdown</span>':"Shutdown")+"</span></label>"+
+    (on?(ok?'<input type="date" data-sdd="'+esc(p.id)+'" value="'+esc(d)+'" aria-label="Date it will be done" title="Date it will be done">':'<span class="sub">'+(d?esc(fmtD(d)):"No date")+"</span>"):"")+"</div>";}
+function bindShut(tb,j){
+  tb.querySelectorAll(".sd-cell").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onkeydown=e=>e.stopPropagation();});
+  tb.querySelectorAll("[data-sd]").forEach(cb=>cb.onchange=()=>saveShut(j.id,cb.dataset.sd,cb.checked?{on:true}:null,cb));
+  tb.querySelectorAll("[data-sdd]").forEach(inp=>inp.onchange=()=>saveShut(j.id,inp.dataset.sdd,{on:true,date:inp.value},inp));}
+async function saveShut(jobId,poleId,val,el){
+  if(!canSave()){refresh();return;}el.disabled=true;
+  try{await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===jobId);const pp=jj&&(jj.poles||[]).find(x=>x.id===poleId);if(!pp)throw new Error("This location was removed.");
+      const at=new Date().toISOString();const prev=pp.shutdown&&pp.shutdown.on?pp.shutdown:null;
+      if(val)pp.shutdown={on:true,date:val.date!=null?val.date:(prev?prev.date||"":""),by:S.me.name,at,since:prev&&prev.since||at};
+      else if(prev){(pp.shutdownLog=pp.shutdownLog||[]).push(Object.assign({},prev,{clearedAt:at,clearedBy:S.me.name}));delete pp.shutdown;}},
+    val?"Workflow: location shutdown":"Workflow: shutdown cleared");
+    refresh();toast(val?(val.date!=null?(val.date?"Shutdown date saved: "+fmtD(val.date):"Shutdown date cleared"):"Location marked Shutdown. Add the date it will be done if you have one."):"Shutdown removed",5000);}
+  catch(x){toast(errText(x),8000);refresh();}}
 function jobStats(j,ss){
   const mine=ss.filter(s=>s.jobId===j.id);const by=st=>mine.filter(s=>s.status===st).length;
   const locs=j.poles||[];const started=new Set(mine.map(s=>s.poleId).filter(Boolean));
-  const doneLocs=locs.filter(p=>{const sh=mine.filter(s=>s.poleId===p.id);return isTeJob(j)?!!p.teDone:sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV);}).length;
+  const doneLocs=locs.filter(p=>locDone(j,p,mine)).length;const shutL=locs.filter(p=>sdOn(p)&&!locDone(j,p,mine));const sdD=shutL.map(p=>p.shutdown.date).filter(Boolean).sort();
   let appr=0,apprOk=true;mine.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceSheet(s).total;if(t==null)apprOk=false;else appr+=t;});
-  return{locs:locs.length,started:started.size,doneLocs,sub:by(ST.SUB),ret:by(ST.RET),gf:by(ST.GF),ok:by(ST.OK)+by(ST.GF),inv:by(ST.INV),hold:mine.filter(s=>s.hold&&s.hold.on).length,appr,apprOk,sheets:mine.length};}
+  return{locs:locs.length,started:started.size,doneLocs,sub:by(ST.SUB),ret:by(ST.RET),gf:by(ST.GF),ok:by(ST.OK)+by(ST.GF),inv:by(ST.INV),hold:mine.filter(s=>s.hold&&s.hold.on).length,appr,apprOk,sheets:mine.length,shut:shutL.length,shutNext:sdD[0]||"",shutNoDate:shutL.length-sdD.length};}
 function renderOverview(){
   const ss=visibleSheets();const all=jobs();const showClosed=!!S.showClosed;
   const list=all.filter(j=>showClosed||!j.archived).sort((a,b)=>(a.archived?1:0)-(b.archived?1:0)||a.name.localeCompare(b.name));
@@ -665,9 +692,9 @@ function renderOverview(){
     '<div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Customer</th><th class="nosort">PO</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Awaiting CM</th><th class="nosort">Awaiting billing</th><th class="nosort">Ready to invoice</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th></tr></thead><tbody id="ov-jobs"></tbody></table></div>';
   const tb=document.getElementById("ov-jobs");
   tb.innerHTML=list.length?list.map(j=>{const st=jobStats(j,ss);const pct=st.locs?st.doneLocs/st.locs:0;
-    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+"</td>"+('<td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+st.started+" started"+(isTeJob(j)?" · "+st.doneLocs+" complete":"")+"</div></td>")+
+    return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||"",j.gf?"CM "+j.gf:""].filter(Boolean).join(" · ")||j.desc)+"</div></td><td>"+esc(j.customer)+'</td><td class="mono">'+esc(j.po)+'</td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+"</td>"+('<td><div class="bar"><div class="track"><div class="fill" style="width:'+Math.round(pct*100)+'%"></div></div><span class="pct">'+st.doneLocs+"/"+st.locs+'</span></div><div class="sub">'+esc(progSub(st))+"</div><div class=\"sub\">"+st.started+" started"+(isTeJob(j)?" · "+st.doneLocs+" complete":"")+"</div></td>")+
       '<td class="mono">'+(st.sub||"")+'</td><td class="mono">'+(st.gf||"")+'</td><td class="mono">'+(st.ok||"")+"</td>"+(can.seePrice()?'<td class="mono num">'+(st.ok+st.inv?(st.apprOk?money(st.appr):'<span class="sub">Check pricing</span>'):"")+"</td>":"")+
-      "<td>"+(j.test?'<span class="chip c-sch">Example</span> ':"")+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+(st.ret?' <span class="chip c-bad">'+st.ret+" returned</span>":"")+(st.hold?' <span class="chip c-bad">'+st.hold+" on hold</span>":"")+"</td></tr>";}).join("")
+      "<td>"+(j.test?'<span class="chip c-sch">Example</span> ':"")+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+(st.ret?' <span class="chip c-bad">'+st.ret+" returned</span>":"")+(st.shut?' <span class="chip c-bad">'+st.shut+" shutdown</span>":"")+(st.hold?' <span class="chip c-bad">'+st.hold+" on hold</span>":"")+"</td></tr>";}).join("")
     :'<tr><td colspan="10"><div class="empty"><b>No jobs yet</b>'+(can.setup()?'Use <a href="#addjob">Add Job</a> to set up the first job and its locations.':"Billing sets up jobs before crews can log units.")+"</div></td></tr>";
   bindRows(tb,id=>location.hash="job-"+id);
   main.querySelectorAll(".tbtn").forEach(b=>b.onclick=()=>{S.f.status=b.dataset.st;S.f.job="";location.hash="sheets";});
@@ -715,11 +742,12 @@ function openGfSign(ids){
 }
 
 /* ---------- job page: locations + unit sheets ---------- */
-function renderJob(){
+function renderJob(){renderJobPage();fixBack();}
+function renderJobPage(){
   const j=jobById(S.docId);
   if(!j){main.innerHTML='<a class="back" href="#overview">← Overview</a><div class="empty"><b>Job not found</b></div>';return;}
   if(isTeJob(j))return renderTeJob(j);
-  const ss=visibleSheets();const st=jobStats(j,ss);const gfList=ss.filter(s=>s.jobId===j.id&&s.status===ST.SUB).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no)));
+  const ss=visibleSheets();const st=jobStats(j,ss);const sa=jobStats(j,sheets());const gfList=ss.filter(s=>s.jobId===j.id&&s.status===ST.SUB).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no)));
   if(!S.jobTab)S.jobTab=canGfSign()&&gfList.length?"gf":"locs";const tab=S.jobTab;
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
     '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta">'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(j.town?"<span>"+esc(j.town)+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+(j.estStart||j.estFinish?"<span>Est. "+esc(fmtD(j.estStart)||"?")+" – "+esc(fmtD(j.estFinish)||"?")+"</span>":"")+'</div></div><div class="acts">'+
@@ -727,13 +755,13 @@ function renderJob(){
       (can.newSheet()&&!j.archived?'<button class="btn" type="button" id="jb-upl">Upload Unit Sheets</button>':"")+'<button class="btn" type="button" id="jb-print"'+((j.poles||[]).length?"":" disabled")+'>Print Unit Sheets</button>'+(can.setup()?'<button class="btn" type="button" id="jb-add">+ Add locations</button><button class="btn" type="button" id="jb-edit">Edit job</button>':"")+(role()!=="crew"?'<button class="btn" type="button" id="jb-csv">Export CSV</button>':"")+"</div></section>"+
     (!j.area&&(j.poles||[]).some(p=>!p.area)&&role()!=="crew"?'<div class="banner">No default pricing area is set for this job, so locations without their own area can\'t be priced. Set it with <b>Edit job</b>.</div>':"")+
     (role()!=="crew"&&((j.packages||[]).length||can.setup())?'<div class="pkgbar"><b>Job package</b>'+(j.packages||[]).map((pk,i)=>'<button class="btn sm" type="button" data-pk="'+i+'" title="Uploaded '+esc(fmtT(pk.at))+" by "+esc(pk.by)+'">'+esc(pk.name)+' <span class="sub">'+fmtSize(pk.size)+"</span></button>").join("")+((j.packages||[]).length?"":'<span class="sub">None uploaded</span>')+(can.setup()?'<button class="btn sm primary" type="button" id="jb-pkg">Upload package</button>':"")+"</div>":"")+
-    '<section class="tiles">'+tile("Locations",st.locs,st.started+" started",false)+tile("Awaiting CM signature",st.sub,"Sheets to review",st.sub>0)+tile("Ready to bill",st.ok,"Signed by the CM",false)+tile("Invoiced",st.inv,"Sheets on invoices",false)+(can.seePrice()?tile("Approved $",st.ok+st.inv?(st.apprOk?money(st.appr):"Check"):"$0.00","Ready + invoiced",false):"")+"</section>"+
+    '<section class="tiles">'+tile("Locations",st.locs,sa.started+" started",false)+tile("Progress",sa.doneLocs+" / "+sa.locs,progSub(sa),false)+shutTile(sa)+tile("Awaiting CM signature",st.sub,"Sheets to review",st.sub>0)+tile("Ready to bill",st.ok,"Signed by the CM",false)+tile("Invoiced",st.inv,"Sheets on invoices",false)+(can.seePrice()?tile("Approved $",st.ok+st.inv?(st.apprOk?money(st.appr):"Check"):"$0.00","Ready + invoiced",false):"")+"</section>"+
     '<div class="subtabs" role="tablist"><button role="tab" type="button" id="t-locs" aria-selected="'+(tab==="locs")+'">Locations</button><button role="tab" type="button" id="t-sheets" aria-selected="'+(tab==="sheets")+'">Unit sheets ('+ss.filter(s=>s.jobId===j.id).length+')</button>'+(canGfSign()?'<button role="tab" type="button" id="t-gf" aria-selected="'+(tab==="gf")+'">CM sign-off ('+gfList.length+")</button>":"")+'</div><div id="jbody"></div>';
   document.getElementById("t-locs").onclick=()=>{S.jobTab="locs";renderJob();};document.getElementById("t-sheets").onclick=()=>{S.jobTab="sheets";renderJob();};const tg=document.getElementById("t-gf");if(tg)tg.onclick=()=>{S.jobTab="gf";renderJob();};
   const on=(i,fn)=>{const b=document.getElementById(i);if(b)b.onclick=fn;};
   on("jb-sheet",()=>openSheetForm(null,j.id));on("jb-pkg",()=>openAddLocations(j.id,true));main.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>openPackage(j.packages[+b.dataset.pk],b));on("jb-print",()=>openPrintPicker(j.id));on("jb-upl",()=>openSheetUpload(j.id));on("jb-add",()=>openAddLocations(j.id));on("jb-edit",()=>{location.hash="jobedit-"+j.id;});
-  on("jb-csv",()=>{const sx=sheets();const head=["#","Ticket ID","Town","Street","ES Pole #","VZ Pole #","PDF Page","WO / Job #","Pricing Area","Date Set","Status","Sheets","Notes"];
-    const lines=[head].concat((j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);return[p.n,p.ticket,p.town,p.street,p.esPole,p.vzPole,p.pdfPage,p.woJob||j.wo,poleArea(j,p),p.dateSet,poleStatus(sh)[0],sh.map(s=>s.no).join(" "),p.notes];}));
+  on("jb-csv",()=>{const sx=sheets();const head=["#","Ticket ID","Town","Street","ES Pole #","VZ Pole #","PDF Page","WO / Job #","Pricing Area","Date Set","Status","Shutdown","Shutdown date","Sheets","Notes"];
+    const lines=[head].concat((j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);return[p.n,p.ticket,p.town,p.street,p.esPole,p.vzPole,p.pdfPage,p.woJob||j.wo,poleArea(j,p),p.dateSet,poleStatus(sh)[0],sdOn(p)?"Yes":"",sdOn(p)?p.shutdown.date||"":"",sh.map(s=>s.no).join(" "),p.notes];}));
     download(new Blob(["﻿"+lines.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Locations - "+j.name+".csv");});
   const box=document.getElementById("jbody");
   if(tab==="gf"){if(!canGfSign())box.innerHTML='<p class="sub">Only a Construction Manager or admin can sign.</p>';else gfTable(box,gfList,false);return;}
@@ -744,20 +772,21 @@ function renderJob(){
     tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceSheet(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+'</td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+(s.lines||[]).length+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="7"><div class="empty"><b>No unit sheets yet</b>Crews submit one sheet per location.</div></td></tr>';
     bindRows(tb,id=>location.hash="sheet-"+id);return;}
   const q=S.pf.q||"",stf=S.pf.st||"";
-  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
-    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
+  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
   const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
   function fill(){const tb=document.getElementById("pl-body");const qq=(S.pf.q||"").trim().toLowerCase();const sx=sheets();
     const rows=(j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);const stt=poleStatus(sh);
       const appr=sh.filter(s=>isReady(s)||s.status===ST.INV).map(priceSheet);const amt=appr.some(x=>x.total==null)?null:appr.reduce((a,x)=>a+x.total,0);return{p,sh,stt,amt,napp:appr.length};})
-      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||r.stt[0]===S.pf.st));
-    document.getElementById("pl-count").textContent=rows.length+" of "+(j.poles||[]).length+" locations";
+      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):r.stt[0]===S.pf.st)));
+    document.getElementById("pl-count").textContent=rows.length+" of "+(j.poles||[]).length+" locations"+(sa.shut?" · "+sa.shut+" shutdown":"");
     tb.innerHTML=rows.map(r=>{const p=r.p;const ar=poleArea(j,p);return'<tr tabindex="0" data-id="'+esc(p.id)+'"><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.vzPole)+'</td><td class="mono">'+esc(p.pdfPage)+"</td><td>"+(ar?esc(ar)+(p.area?"":' <span class="sub">(job default)</span>'):'<span class="late">Not set</span>')+'</td><td class="mono">'+r.sh.length+"</td>"+
-      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+'</span></td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="13"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
-    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});
+      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="14"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
+    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
+function fixBack(){if(role()!=="crew")return;const b=main.querySelector("a.back");if(b){b.href="#sheets";b.textContent="← My unit sheets";}}
 
 /* ---------- printable crew daily unit checklist (one page per location) ---------- */
 function unitSheetPage(j,p,i,n){
