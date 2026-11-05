@@ -604,3 +604,31 @@ function teInvDailyHtml(d,pv){
     (eq.length?'<div'+(pv?' style="margin-top:8px"':' class="tablebox" style="margin-top:8px"')+'><table class="'+T+'"><thead><tr><th>Equipment — rate item</th><th class="num">Units</th>'+hd+'<th class="num">Total hrs</th></tr></thead><tbody>'+
       eq.map(e=>"<tr><td>"+esc(e.item)+'</td><td class="'+n+'">'+(e.units.size||"")+"</td>"+e.h.map(v=>'<td class="'+n+'">'+(v?fmtN(v):"")+"</td>").join("")+'<td class="'+n+'"><b>'+fmtN(e.h.reduce((a,v)=>a+v,0))+"</b></td></tr>").join("")+
       '</tbody><tfoot><tr><td colspan="2">Equipment hours</td>'+days.map((x,k)=>'<td class="'+n+'">'+(eq.reduce((a,e)=>a+e.h[k],0)?fmtN(eq.reduce((a,e)=>a+e.h[k],0)):"")+"</td>").join("")+'<td class="'+n+'">'+fmtN(eq.reduce((a,e)=>a+e.h.reduce((x,v)=>x+v,0),0))+"</td></tr></tfoot></table></div>":"")+(pv?"</div>":"");}
+
+/* ---------- Timesheets tab: every submitted T&E timesheet across jobs ---------- */
+function renderTimesheets(){
+  const f=S.tsf||(S.tsf={q:"",job:"",st:"",pay:""});const all=visibleSheets().filter(isTe);const priced=can.seePrice();
+  const jl=jobs().filter(j=>isTeJob(j)||all.some(s=>s.jobId===j.id));
+  const by=st=>all.filter(s=>s.status===st).length;
+  main.innerHTML='<section class="jobhead"><div><h1>Timesheets</h1><div class="meta"><span>Every submitted T&amp;E timesheet, all jobs</span></div></div></section>'+
+    '<section class="tiles">'+tile("Timesheets",all.length,all.length?"Latest "+teWeekText(all.slice().sort((a,b)=>String(b.workDate).localeCompare(String(a.workDate)))[0]):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"To review",by(ST.SUB)>0)+tile("Returned to field",by(ST.RET),"Need a corrected upload",by(ST.RET)>0)+tile("Ready to bill",all.filter(isReady).length,"Signed by the CM",false)+tile("Invoiced",by(ST.INV),"On invoices",false)+tile("Pay sheets",all.filter(s=>s.paySheet).length+" / "+all.length,"Published",false)+"</section>"+
+    '<div class="filters"><input type="search" id="ts-q" placeholder="Search timesheet #, foreman, WO, person…" aria-label="Search timesheets" value="'+esc(f.q)+'">'+
+    '<select id="ts-job" aria-label="Job"><option value="">All jobs</option>'+jl.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===f.job?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select>"+
+    '<select id="ts-st" aria-label="Status"><option value="">All statuses</option>'+[ST.SUB,ST.RET,"ready",ST.INV].map(x=>'<option value="'+x+'"'+(x===f.st?" selected":"")+">"+esc(x==="ready"?"Ready to bill":ST_LABEL[x]||x)+"</option>").join("")+"</select>"+
+    '<select id="ts-pay" aria-label="Pay sheet"><option value="">Pay sheet: any</option><option value="yes"'+(f.pay==="yes"?" selected":"")+'>Published</option><option value="no"'+(f.pay==="no"?" selected":"")+'>Not published</option></select><span class="count" id="ts-count"></span><button class="btn" type="button" id="ts-csv">Export CSV</button></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Timesheet #</th><th class="nosort">Job</th><th class="nosort">Week</th><th class="nosort">Foreman</th><th class="nosort">Crew</th>'+(priced?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Pay sheet</th><th class="nosort">Invoice</th><th class="nosort">Submitted</th></tr></thead><tbody id="ts-body"></tbody></table></div>';
+  const rows=()=>{const q=f.q.trim().toLowerCase();return all.filter(s=>(!f.job||s.jobId===f.job)&&(!f.st||(f.st==="ready"?isReady(s):s.status===f.st))&&(!f.pay||(f.pay==="yes")===!!s.paySheet)&&
+      (!q||[s.no,s.crew,s.gf,s.wo,s.fwo,(jobById(s.jobId)||{}).name,s.invoiceNo,(s.labor||[]).map(L=>L.name).join(" ")].join(" ").toLowerCase().indexOf(q)>=0))
+    .sort((a,b)=>String(b.workDate).localeCompare(String(a.workDate))||String(b.no).localeCompare(String(a.no)));};
+  function fill(){const list=rows();document.getElementById("ts-count").textContent=list.length+" of "+all.length;
+    const tb=document.getElementById("ts-body");
+    tb.innerHTML=list.map(s=>{const j=jobById(s.jobId);const pr=priced?priceSheet(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+esc(j?j.name:"")+"</td><td>"+esc(teWeekText(s))+"</td><td>"+crewCell(s)+'</td><td class="wrapc">'+esc(teSummary(s))+"</td>"+
+      (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td><td>"+(s.paySheet?'<span class="chip c-done">Published</span>':'<span class="sub">—</span>')+'</td><td class="mono">'+esc(s.invoiceNo||"")+'</td><td class="sub">'+esc((s.createdBy||"")+" · "+fmtD((s.submittedAt||s.createdAt||"").slice(0,10)))+"</td></tr>";}).join("")||
+      '<tr><td colspan="10"><div class="empty"><b>'+(all.length?"No timesheets match the filters":"No timesheets yet")+"</b>"+(all.length?"":"Weekly timesheets appear here once they're uploaded on a T&amp;E job.")+"</div></td></tr>";
+    bindRows(tb,id=>location.hash="sheet-"+id);}
+  const on=(id,ev,fn)=>{document.getElementById(id)[ev]=fn;};
+  on("ts-q","oninput",e=>{f.q=e.target.value;fill();});on("ts-job","onchange",e=>{f.job=e.target.value;fill();});on("ts-st","onchange",e=>{f.st=e.target.value;fill();});on("ts-pay","onchange",e=>{f.pay=e.target.value;fill();});
+  on("ts-csv","onclick",()=>{const L=[["Timesheet #","Job","Week start","Week end","Foreman","General Foreman","WO","FWO","People","Labor hrs","Equipment"].concat(priced?["Amount (USD)"]:[]).concat(["Status","Pay sheet","Invoice #","Submitted by","Submitted"])];
+    rows().forEach(s=>{const pr=priced?priceSheet(s):null;L.push([s.no,(jobById(s.jobId)||{}).name||"",s.weekStart||s.workDate||"",s.weekEnd||"",s.crew,s.gf||"",s.wo||"",s.fwo||"",(s.labor||[]).length,teHours(s),(s.equip||[]).length].concat(priced?[pr.total==null?"":cents(pr.total)]:[]).concat([ST_LABEL[s.status]||s.status,s.paySheet?"Published":"",s.invoiceNo||"",s.createdBy||"",(s.submittedAt||s.createdAt||"").slice(0,10)]));});
+    download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Timesheets.csv");});
+  fill();}

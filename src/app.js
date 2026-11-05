@@ -335,12 +335,12 @@ function route(){
   else if(h.indexOf("inv-")===0){S.view="invoice";S.docId=h.slice(4);}
   else if(h.indexOf("jobedit-")===0){S.view="jobedit";S.docId=h.slice(8);}
   else if(h.indexOf("job-")===0){const id=h.slice(4);if(S.view!=="job"||S.docId!==id){S.jobTab=null;S.pf={q:"",st:""};}S.view="job";S.docId=id;}
-  else if(["invoices","addjob","addjob-new","rates","sheets","ubl"].includes(h))S.view=h;else S.view="overview";
+  else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets"].includes(h))S.view=h;else S.view="overview";
   if(role()==="crew"&&S.view!=="sheet")S.view="sheets";  /* crews only see and fill out their own unit sheets */
   if(S.view==="rates"&&!canRates())S.view="overview";
   if(["invoices","invoice"].includes(S.view)&&!can.seeInvoices())S.view="overview";
   if(S.view==="ubl"&&!canUbl())S.view="overview";
-  const nav=role()==="crew"?{sheet:"sheets"}[S.view]||"sheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob"}[S.view]||S.view;
+  const nav=role()==="crew"?{sheet:"sheets"}[S.view]||"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob"}[S.view]||S.view;
   if(S.view!=="jobedit")S.jobEdit=null;
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});
   refresh();window.scrollTo(0,0);
@@ -351,12 +351,12 @@ function refresh(){
   if(!S.loaded)return;
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   set("ct-jobs",jobs().filter(j=>!j.archived).length||"");
-  set("ct-ready",sheets().filter(isReady).length||"");
+  set("ct-ready",sheets().filter(isReady).length||"");set("ct-ts",sheets().filter(s=>isTe(s)&&s.status===ST.SUB).length||"");
   document.getElementById("btn-new").hidden=!can.newSheet();
   document.querySelectorAll("[data-nav=rates]").forEach(a=>a.hidden=!canRates());document.querySelectorAll("[data-nav=invoices]").forEach(a=>a.hidden=!can.seeInvoices());document.querySelectorAll("[data-nav=ubl]").forEach(a=>a.hidden=!canUbl());
   const v=S.view;
   if(v==="sheet")renderSheet();else if(v==="invoice")renderInvoice();else if(v==="invoices")renderInvoices();
-  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else renderOverview();
+  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else if(v==="timesheets")renderTimesheets();else renderOverview();
 }
 
 /* ---------- pricing (rates from the template's Unit Rate Master; no rounding until display / final total) ---------- */
