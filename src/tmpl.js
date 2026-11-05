@@ -98,11 +98,41 @@ async function fill(buf,inv){
     let wr=await t.zip.file("xl/_rels/workbook.xml.rels").async("string");wr=wr.replace(/<Relationship[^>]*calcChain[^>]*\/>/,"");t.zip.file("xl/_rels/workbook.xml.rels",wr);}
   return t.zip.generateAsync({type:"uint8array",compression:"DEFLATE",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
 }
+
+/* finish a filled workbook: recalc on open, drop the stale calc chain */
+async function finish(t){
+  let wb=await t.zip.file("xl/workbook.xml").async("string");
+  if(/<calcPr\b/.test(wb))wb=wb.replace(/<calcPr\b([^>]*?)(\/?)>/,(m,a,s)=>"<calcPr"+a.replace(/\s*fullCalcOnLoad="[^"]*"/,"")+' fullCalcOnLoad="1"'+s+">");
+  else wb=wb.replace("</workbook>",'<calcPr fullCalcOnLoad="1"/></workbook>');
+  t.zip.file("xl/workbook.xml",wb);
+  if(t.zip.file("xl/calcChain.xml")){t.zip.remove("xl/calcChain.xml");
+    let ct=await t.zip.file("[Content_Types].xml").async("string");ct=ct.replace(/<Override[^>]*calcChain[^>]*\/>/,"");t.zip.file("[Content_Types].xml",ct);
+    let wr=await t.zip.file("xl/_rels/workbook.xml.rels").async("string");wr=wr.replace(/<Relationship[^>]*calcChain[^>]*\/>/,"");t.zip.file("xl/_rels/workbook.xml.rels",wr);}
+  return t.zip.generateAsync({type:"uint8array",compression:"DEFLATE",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});}
+/* generic: edit cells on one tab. edits = {ref: value} where value "" / null clears the cell and {f:"..."} writes a formula.
+   rename = new tab name. Cached formula results on that tab are dropped so Excel recalculates them on open. */
+async function fillCells(buf,tab,edits,rename){
+  const t=await open(buf);let x=await sheetXml(t,tab);
+  for(const [ref,val] of Object.entries(edits)){
+    if(val&&typeof val==="object"&&val.f!=null){const cre=new RegExp('<c r="'+ref+'"(\\s[^>]*?)?(?:/>|>[\\s\\S]*?</c>)');let m=cre.exec(x);
+      if(!m){x=setCellXml(x,ref,"");m=cre.exec(x);}const sm=/\bs="(\d+)"/.exec(m[1]||"");x=x.replace(m[0],'<c r="'+ref+'"'+(sm?' s="'+sm[1]+'"':"")+"><f>"+encX(val.f)+"</f></c>");continue;}
+    x=setCellXml(x,ref,val);}
+  x=x.replace(/(<c\b[^>]*>)(<f\b[^>]*>[\s\S]*?<\/f>|<f\b[^>]*\/>)<v>[\s\S]*?<\/v>/g,"$1$2");
+  t.zip.file(t.sheets[tab],x);
+  if(rename&&rename!==tab){let wb=await t.zip.file("xl/workbook.xml").async("string");const oe=encX(tab),ne=encX(rename);
+    wb=wb.replace(new RegExp('(<sheet\\b[^>]*name=")'+oe.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+'"'),(m0,p1)=>p1+ne+'"');
+    wb=wb.split("'"+oe+"'!").join("'"+ne+"'!");t.zip.file("xl/workbook.xml",wb);}
+  return finish(t);}
+
+/* raw cells of one tab: {f: {ref: formula}, v: {ref: value}} */
+async function cells(buf,tab){const t=await open(buf);const x=await sheetXml(t,tab);const f={};
+  x.replace(/<c r="([A-Z]+\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/c>)/g,(m,ref,body)=>{if(body){const fm=/<f\b[^>]*>([\s\S]*?)<\/f>/.exec(body);if(fm)f[ref]=dec(fm[1]);}return m;});
+  return{f,v:await read(t,tab)};}
 /* any workbook -> {names, get(name) -> rows of cell values} for importing location lists */
 async function tables(buf){const t=await open(buf);const names=Object.keys(t.sheets);
   return{names,get:async name=>{const m=await read(t,name);let mr=0,mc=0;const cells=[];
     m.forEach((v,ref)=>{const {col,row}=splitRef(ref);const c=colNum(col);if(v==null||v==="")return;cells.push([row,c,v]);if(row>mr)mr=row;if(c>mc)mc=c;});
     const out=Array.from({length:mr},()=>Array(mc).fill(""));cells.forEach(([r,c,v])=>{out[r-1][c-1]=v;});return out;}};}
-return{parse,fill,tables,itemKey,norm};
+return{parse,fill,fillCells,cells,tables,itemKey,norm};
 })();
 if(typeof module!=="undefined")module.exports=TMPL;

@@ -417,7 +417,7 @@ function renderSheet(){
   if(!d||d.type!=="sheet"||(role()==="crew"&&d.createdByKey!==S.myKey)){main.innerHTML='<a class="back" href="#sheets">← Sheets</a><div class="empty"><b>Sheet not found</b>It may have been removed.</div>';return;}
   const j=jobById(d.jobId);const p=poleById(j,d.poleId);const id=S.docId;
   const acts=[];
-  if(isTe(d)){if(d.status!==ST.INV&&(can.setup()||canGfSign()))acts.push('<button class="btn" type="button" id="a-edit">Per diem, lodging &amp; subs</button>');}
+  if(isTe(d)){if(canPaySheet(d))acts.push('<button class="btn'+(role()==="crew"?" primary":"")+'" type="button" id="a-pay">'+(d.paySheet?"Pay sheet ✓":"Publish pay sheet")+"</button>");if(d.status!==ST.INV&&(can.setup()||canGfSign()))acts.push('<button class="btn" type="button" id="a-edit">Per diem, lodging &amp; subs</button>');}
   else if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
   if(can.hold(d))acts.push('<button class="btn" type="button" id="a-hold">'+(d.hold&&d.hold.on?"Release hold":"Hold")+"</button>");
   if(can.gf(d))acts.push('<button class="btn danger" type="button" id="a-gfret">Return to field</button><button class="btn primary" type="button" id="a-gfok">CM sign &amp; approve</button>');
@@ -437,7 +437,7 @@ function renderSheet(){
   fillPhotoImgs(main);main.querySelectorAll("[data-open-photo]").forEach(a=>a.onclick=ev=>{ev.preventDefault();openPhoto(d,a.dataset.openPhoto);});
   const on=(sel,fn)=>{const b=document.getElementById(sel);if(b)b.onclick=fn;};
   const guard=want=>x=>{if(x.status!==want)throw new Error("This sheet was already moved to "+(ST_LABEL[x.status]||x.status)+" by someone else.");};
-  on("a-edit",()=>isTe(d)?openTeExtras(id):openSheetForm(id));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));on("a-scan",()=>openPackage(d.scan,document.getElementById("a-scan")));
+  on("a-edit",()=>isTe(d)?openTeExtras(id):openSheetForm(id));on("a-pay",()=>openPaySheet(id));on("a-paydl",()=>openPackage(d.paySheet.file,document.getElementById("a-paydl")));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));on("a-scan",()=>openPackage(d.scan,document.getElementById("a-scan")));
   on("a-hold",()=>{const h=d.hold&&d.hold.on;confirmBox(h?"Release hold on "+d.no+"?":"Put "+d.no+" on hold?",h?"The sheet continues through approval.":"The sheet stays where it is but is flagged and can't be invoiced until the hold is released.",h?"Release hold":"Hold",async n=>{
     await commitDoc(id,x=>{x.hold=h?{on:false}:{on:true,note:n,by:S.me.name,at:new Date().toISOString()};},h?"Hold released"+(n?": "+n:""):"Put on hold: "+n);},{note:h?"Note":"Reason for hold",noteReq:!h});});
   on("a-gfok",()=>openGfSign([id]));
@@ -1124,7 +1124,7 @@ function renderRates(){
       '<tr><td>Pole Set</td><td><b>C&amp;K</b> <span class="sub">(on the crew checklist)</span></td>'+r.areas.map(()=>'<td class="num"><span class="late">No rate</span></td>').join("")+"</tr></tbody></table></div>":'<div class="empty"><b>No rates yet</b>Load the master template to bring in the Unit Rate Master.</div>');
   document.getElementById("r-dl").onclick=async()=>{try{const b=await templateBuf();download(new Blob([b],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),tm.name);}catch(e){toast(errText(e),8000);}};
   const up=document.getElementById("r-up");if(up)up.onclick=openTemplateUpload;
-  main.insertAdjacentHTML("beforeend",'<div id="te-rates"></div>');teRatesSection(document.getElementById("te-rates"));
+  main.insertAdjacentHTML("beforeend",'<div id="te-rates"></div><div id="pay-tpl"></div>');teRatesSection(document.getElementById("te-rates"));payTplSection(document.getElementById("pay-tpl"));
 }
 function openTemplateUpload(){
   if(!canRates()||!canSave())return;

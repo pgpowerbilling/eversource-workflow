@@ -217,7 +217,7 @@ function teDetailsHtml(d){const j=jobById(d.jobId);const im=d.imported||{};const
     dl("T&E pricing",set?esc(set.name+(j.teArea&&!teAreaFree(set)?" · "+j.teArea:"")):'<span class="late">Not set on the job</span>')+dl("Crew",esc(teSummary(d)))+
     dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
     (d.source?dl("Weekly time sheet",'<button class="btn sm" type="button" id="a-src">'+esc(d.source.name)+"</button>"+(im.tab?' <span class="sub">tab '+esc(im.tab)+"</span>":""),true):"")+
-    (d.scan?dl("Signed copy",'<button class="btn sm" type="button" id="a-scan">'+esc(d.scan.name)+"</button>"):"")+(im.signedDate?dl("Sheet date",esc(fmtD(im.signedDate))):"")+(im.custRep?dl("Customer rep",esc(im.custRep)):"")+
+    (d.paySheet?dl("Pay sheet",'<button class="btn sm" type="button" id="a-paydl">'+esc(d.paySheet.file.name)+'</button> <span class="sub">published by '+esc(d.paySheet.by)+" · "+esc(fmtT(d.paySheet.at))+"</span>",true):"")+(d.scan?dl("Signed copy",'<button class="btn sm" type="button" id="a-scan">'+esc(d.scan.name)+"</button>"):"")+(im.signedDate?dl("Sheet date",esc(fmtD(im.signedDate))):"")+(im.custRep?dl("Customer rep",esc(im.custRep)):"")+
     (d.notes?dl("Description of work",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"");}
 function teBodyHtml(d){
   const priced=can.seePrice();const pr=priceTeWeek(d);const days=d.days||[];
@@ -473,3 +473,88 @@ function xlDate(v){if(typeof v==="number"&&v>30000&&v<80000){const d=new Date(Da
   m=/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(s);if(m){const y=m[3].length===2?"20"+m[3]:m[3];return y+"-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");}return"";}
 function teSuggest(text,options){const words=t=>new Set(String(t).toLowerCase().replace(/[^a-z0-9 ]/g," ").split(" ").filter(w=>w.length>1));const a=words(text);if(!a.size)return"";
   let best="",bs=0;options.forEach(o=>{const b=words(o);let n=0;a.forEach(w=>{if(b.has(w))n++;});const sc=n/Math.max(a.size,b.size);if(sc>bs){bs=sc;best=o;}});return bs>=0.34?best:"";}
+
+/* ---------- weekly pay sheet (Western Mass Local 42 template) ----------
+   Built from a weekly T&E timesheet: each person's daily ST / OT / DT go into the template's Monday → Sunday columns,
+   PD = 1 for each day worked, meals left blank. The template's own formulas compute pay (wage from its SCALES tab × hours,
+   OT × 1.5, DT × 2), per diem ($150 per PD) and dues (3%). The app shows the same math before publishing. */
+const PAY_DAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const payTpl=()=>(S.index&&S.index.payTpl)||null;
+async function parsePayTemplate(buf){
+  const book=await TMPL.tables(buf);const sc=book.names.find(n=>/scale/i.test(n));if(!sc)throw new Error('The pay sheet template needs its scales tab (e.g. "SCALES-DO NOT DELETE").');
+  const s=v=>String(v==null?"":v).replace(/\s+/g," ").trim();
+  const srows=await book.get(sc);const scales=[];srows.forEach((r,i)=>{if(i===0)return;const cls=s(r[1]),w=typeof r[2]==="number"?r[2]:Number(s(r[2]));if(cls&&isFinite(w)&&w>0)scales.push({pos:s(r[0]),cls,wage:w});});
+  if(!scales.length)throw new Error("No wages were found on the scales tab (Position / Class / WAGE).");
+  let tab="",layout=null;
+  for(const n of book.names){if(n===sc)continue;const a=await book.get(n);const hr=a.findIndex(r=>/^name$/i.test(s(r[0]))&&/^class$/i.test(s(r[1])));if(hr<0)continue;
+    const days=PAY_DAYS.map(d=>a[hr].findIndex(v=>s(v).toLowerCase()===d.toLowerCase()));if(days.some(c=>c<0))continue;
+    const sub=a[hr+1]||[];const okSub=days.every(c=>/^st$/i.test(s(sub[c]))&&/^ot$/i.test(s(sub[c+1]))&&/^dt$/i.test(s(sub[c+2]))&&/^mm$/i.test(s(sub[c+3]))&&/^pd$/i.test(s(sub[c+4])));
+    if(!okSub)throw new Error('Tab "'+n+'": each day needs ST / OT / DT / MM / PD columns under it.');
+    const dateCol=a[hr].findIndex((v,c)=>c>days[0]&&c<days[1]&&s(v)!=="");
+    let last=hr+2;for(let r=hr+2;r<a.length;r++){if(s(a[r][0])||typeof a[r][2]==="number"||s(a[r][2]))last=r;}
+    layout={headerRow:hr+1,firstRow:hr+4,lastRow:Math.min(last+1,hr+4+60),days,dateCol};tab=n;break;}
+  if(!layout)throw new Error("No pay tab with Name / CLASS and Monday → Sunday columns was found.");
+  /* fixes: every row's meals total × $25 and per diem total × $150 (the template had ×20 / ×800 on some rows); clear old typed totals under the table */
+  const raw=await TMPL.cells(buf,tab);const a=await book.get(tab);const hr=layout.headerRow-1;const tc=a[hr].findIndex(v=>/^total hrs$/i.test(s(v)));const fix={},notes=[];
+  if(tc>=0){const mm=colL(tc+3),pd=colL(tc+4);
+    [[mm,25,"meals"],[pd,150,"per diem"]].forEach(([c,k,l])=>{const base=raw.f[c+layout.firstRow];if(!base)return;
+      /* write the formula on every row (the template shares one formula down the column, so fixing only the first cell would break the rows that reuse it) */
+      for(let r=layout.firstRow;r<=layout.lastRow;r++){const own=raw.f[c+r];const m2=own&&/\*\s*(\d+(?:\.\d+)?)\s*$/.exec(own);if(m2&&+m2[1]!==k)notes.push(c+r+" "+l+" ×"+m2[1]+" → ×"+k+(r<layout.lastRow?" (and the rows that share it)":""));
+        fix[c+r]={f:base.replace(new RegExp("([A-Z]+)"+layout.firstRow+"(?![0-9])","g"),"$1"+r).replace(/\*\s*\d+(?:\.\d+)?\s*$/,"*"+k)};}});}
+  const pay=a[hr+1]?a[hr+1].findIndex(v=>/^st pay$/i.test(s(v))):-1;
+  if(pay>=0)for(let r=layout.lastRow+1;r<=Math.min(a.length,layout.lastRow+8);r++)for(let c=pay;c<pay+8;c++){const ref=colL(c)+r;if(!raw.f[ref]&&typeof raw.v.get(ref)==="number"){fix[ref]="";notes.push(ref+" old typed total "+raw.v.get(ref)+" cleared");}}
+  return{tab,scalesTab:sc,scales,layout,fix,fixNotes:notes};}
+const colL=n=>{let s="";n++;while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26);}return s;};
+function payClassFor(L){const al=(S.index&&S.index.payAlias)||{};const sc=(payTpl()&&payTpl().scales)||[];const has=c=>sc.some(x=>x.cls===c);const k=teNorm(L.cls);
+  if(al[k]&&has(al[k]))return al[k];if(has(L.cls))return L.cls;const d={F:"FM",L:"JL",G:"GM2",GM:"GM2",OP:"OP",D:"DGM",DG:"DGM"}[k];return d&&has(d)?d:"";}
+function payRows(d,cls){const sc=payTpl().scales;
+  return(d.labor||[]).map((L,i)=>{const c=cls[i];const w=(sc.find(x=>x.cls===c)||{}).wage;const days=(d.days||[]).map((x,k)=>{const h=L.h&&L.h[k]||{};const t=(Number(h.st)||0)+(Number(h.ot)||0)+(Number(h.dt)||0);return{st:Number(h.st)||0,ot:Number(h.ot)||0,dt:Number(h.dt)||0,pd:t>0?1:0};});
+    const st=days.reduce((a,x)=>a+x.st,0),ot=days.reduce((a,x)=>a+x.ot,0),dt=days.reduce((a,x)=>a+x.dt,0),pd=days.reduce((a,x)=>a+x.pd,0);
+    const stp=w==null?null:w*st,otp=w==null?null:w*1.5*ot,dtp=w==null?null:w*2*dt,tot=w==null?null:stp+otp+dtp;
+    return{name:L.name,cls:c,sheetCls:L.cls,wage:w,days,st,ot,dt,pd,stp,otp,dtp,tot,perDiem:pd*150,meals:0,dues:tot==null?null:tot*0.03};});}
+function canPaySheet(d){return isTe(d)&&d.weekly&&(role()==="crew"?d.createdByKey===S.myKey:role()!=="viewer");}
+function openPaySheet(id){
+  const d=S.docs.get(id);if(!d||!canPaySheet(d))return;const tp=payTpl();
+  if(!tp){toast(canRates()?"Load the pay sheet template first (Rates tab).":"The pay sheet template hasn't been loaded yet. Ask billing.",7000);return;}
+  if(d.labor.length>tp.layout.lastRow-tp.layout.firstRow+1){toast("This week has "+d.labor.length+" people but the pay sheet template has room for "+(tp.layout.lastRow-tp.layout.firstRow+1)+".",8000);return;}
+  const prev=d.paySheet;const cls=(d.labor||[]).map((L,i)=>(prev&&prev.rows&&prev.rows[i]&&prev.rows[i].name===L.name&&prev.rows[i].cls)||payClassFor(L));
+  const m=modal("Pay sheet — "+teWeekText(d),'<div id="ps-body"></div>',
+    (prev?'<button class="btn" type="button" id="ps-dl">Download published pay sheet</button>':"")+'<button class="btn" type="button" data-x>Close</button><button class="btn primary" type="button" id="ps-go">'+(prev?"Republish pay sheet":"Publish pay sheet")+"</button>","wide");
+  const opts=tp.scales.map(x=>'<option value="'+esc(x.cls)+'">'+esc(x.cls+" — "+x.pos+" ($"+x.wage.toFixed(2)+")")+"</option>").join("");
+  function draw(){const rows=payRows(d,cls);const T=k=>rows.reduce((a,r)=>a+(r[k]||0),0);const miss=rows.filter(r=>r.wage==null);
+    m.querySelector("#ps-body").innerHTML=(prev?'<div class="okbox" style="margin:0">Published by '+esc(prev.by)+" · "+esc(fmtT(prev.at))+" · total pay "+money(prev.totals.pay)+". Republishing replaces it.</div>":"")+
+      '<p class="sub" style="margin:0">From '+esc(d.no)+": hours by day, PD = 1 for each day worked, no meals. Pay uses the template's scales ("+esc(tp.name)+'): ST × wage, OT × 1.5, DT × 2; per diem $150 per PD day; dues 3% of pay. Check each person\'s pay class.</p>'+
+      '<div class="tablebox" style="max-height:52vh;overflow:auto"><table class="static"><thead><tr><th>Name</th><th>Timesheet class</th><th>Pay class</th><th class="num">Wage</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th><th class="num">PD</th><th class="num">ST pay</th><th class="num">OT pay</th><th class="num">DT pay</th><th class="num">Total pay</th><th class="num">Per diem</th><th class="num">Dues</th></tr></thead><tbody>'+
+      rows.map((r,i)=>"<tr><td><b>"+esc(r.name)+"</b></td><td>"+esc(r.sheetCls)+'</td><td><select data-c="'+i+'" aria-label="Pay class for '+esc(r.name)+'"><option value="">Pick…</option>'+opts.replace('value="'+esc(r.cls)+'"','value="'+esc(r.cls)+'" selected')+'</select></td><td class="mono num">'+(r.wage==null?'<span class="late">—</span>':money(r.wage))+'</td><td class="mono num">'+fmtN(r.st)+'</td><td class="mono num">'+fmtN(r.ot)+'</td><td class="mono num">'+fmtN(r.dt)+'</td><td class="mono num">'+r.pd+'</td><td class="mono num">'+(r.stp==null?"—":money(r.stp))+'</td><td class="mono num">'+(r.otp==null?"—":money(r.otp))+'</td><td class="mono num">'+(r.dtp==null?"—":money(r.dtp))+'</td><td class="mono num"><b>'+(r.tot==null?"—":money(r.tot))+'</b></td><td class="mono num">'+money(r.perDiem)+'</td><td class="mono num">'+(r.dues==null?"—":money(r.dues))+"</td></tr>").join("")+
+      '</tbody><tfoot><tr><td colspan="4" class="num"><b>Totals (USD)</b></td><td class="mono num"><b>'+fmtN(T("st"))+'</b></td><td class="mono num"><b>'+fmtN(T("ot"))+'</b></td><td class="mono num"><b>'+fmtN(T("dt"))+'</b></td><td class="mono num"><b>'+T("pd")+'</b></td><td class="mono num">'+(miss.length?"—":money(T("stp")))+'</td><td class="mono num">'+(miss.length?"—":money(T("otp")))+'</td><td class="mono num">'+(miss.length?"—":money(T("dtp")))+'</td><td class="mono num"><b>'+(miss.length?"—":money(T("tot")))+'</b></td><td class="mono num"><b>'+money(T("perDiem"))+'</b></td><td class="mono num"><b>'+(miss.length?"—":money(T("dues")))+"</b></td></tr></tfoot></table></div>"+
+      (miss.length?'<div class="banner">Pick a pay class for: '+esc(miss.map(r=>r.name).join(", "))+"</div>":'<div class="okbox" style="margin:0">Total pay '+money(T("tot"))+" + per diem "+money(T("perDiem"))+" = <b>"+money(T("tot")+T("perDiem"))+'</b> <span class="sub">(Calculated; dues '+money(T("dues"))+" are 3% of pay)</span></div>");
+    m.querySelectorAll("[data-c]").forEach(el=>el.onchange=()=>{cls[+el.dataset.c]=el.value;draw();});}
+  draw();
+  const dlb=m.querySelector("#ps-dl");if(dlb)dlb.onclick=()=>openPackage(prev.file,dlb);
+  m.querySelector("#ps-go").onclick=e=>busyRun(e.target,m,async()=>{const rows=payRows(d,cls);const miss=rows.filter(r=>r.wage==null);if(miss.length)throw new Error("Pick a pay class for "+miss.map(r=>r.name).join(", ")+".");if(!canSave())return;
+    e.target.textContent="Building pay sheet…";const box=await (async()=>{let b;if(hasToken()){const f=await ghGet("data/files/"+tp.file);if(!f)throw new Error("The pay sheet template file is missing.");b=JSON.parse(f.text);}else b=await pagesGet("data/files/"+tp.file);return decJson(S.dek,b);})();
+    const L=tp.layout;const ed={};const ws=d.weekStart;const mdY=iso=>{const[y,mo,da]=iso.split("-");return(+mo)+"."+(+da)+"."+y.slice(2);};
+    const serial=iso=>Math.round((Date.UTC(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10))-Date.UTC(1899,11,30))/864e5);
+    if(L.dateCol>=0)ed[colL(L.dateCol)+L.headerRow]=serial(ws);
+    for(let r=L.firstRow;r<=L.lastRow;r++){ed["A"+r]="";ed["B"+r]="";L.days.forEach(c=>{for(let k=0;k<5;k++)ed[colL(c+k)+r]="";});}
+    rows.forEach((p,i)=>{const r=L.firstRow+i;ed["A"+r]=p.name;ed["B"+r]=p.cls;p.days.forEach((x,k)=>{const c=L.days[k];if(x.st)ed[colL(c)+r]=x.st;if(x.ot)ed[colL(c+1)+r]=x.ot;if(x.dt)ed[colL(c+2)+r]=x.dt;if(x.pd)ed[colL(c+4)+r]=1;});});
+    Object.assign(ed,tp.fix||{});
+    const title=tp.title?tp.title.replace(/\d{1,2}\.\d{1,2}\.\d{2,4}/,mdY(ws)):"";if(title)ed["A1"]=title;
+    const tabName=mdY(ws)+" TO "+mdY(addDays(ws,6));
+    const out=await TMPL.fillCells(unb64(box.b64),tp.tab,ed,tabName);
+    const fname=(jobById(d.jobId)||{name:"Job"}).name+" Paysheet "+mdY(ws).replace(/\./g,"-")+".xlsx";
+    const fileObj=new File([out],fname,{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const meta=await storePackage(fileObj);const T=k=>rows.reduce((a,r)=>a+(r[k]||0),0);
+    const rec={file:meta,at:new Date().toISOString(),by:S.me.name,rows:rows.map(r=>({name:r.name,cls:r.cls,wage:r.wage,st:r.st,ot:r.ot,dt:r.dt,pd:r.pd,tot:r.tot})),totals:{pay:T("tot"),perDiem:T("perDiem"),dues:T("dues"),hours:T("st")+T("ot")+T("dt")}};
+    await commitIndex(ix=>{ix.payAlias=ix.payAlias||{};const by=new Map();rows.forEach(r=>{const k=teNorm(r.sheetCls);if(!k)return;(by.get(k)||by.set(k,new Set()).get(k)).add(r.cls);});by.forEach((v,k)=>{if(v.size===1)ix.payAlias[k]=[...v][0];});},"Workflow: pay class matches");
+    const ok=await commitDoc(id,x=>{x.paySheet=rec;},(prev?"Pay sheet republished: ":"Pay sheet published: ")+fname+" · pay "+money(rec.totals.pay)+" + per diem "+money(rec.totals.perDiem));
+    if(ok){download(new Blob([out],{type:fileObj.type}),fname);closeOverlay();toast("Pay sheet published and downloaded");}});}
+/* Rates tab: pay sheet template */
+function payTplSection(host){const tp=payTpl();const ed=canRates()&&S.canWrite;
+  host.innerHTML='<section class="jobhead" style="margin-top:22px"><div><h1 style="font-size:20px">Pay sheet template</h1><div class="meta">'+(tp?"<b>"+esc(tp.name)+"</b> · loaded "+esc(fmtT(tp.at))+" by "+esc(tp.by)+" · tab "+esc(tp.tab)+" · "+tp.scales.length+" pay classes · room for "+(tp.layout.lastRow-tp.layout.firstRow+1)+" people":"Not loaded yet")+'</div></div><div class="acts">'+(tp?'<button class="btn" type="button" id="pt-dl">Download template</button>':"")+(ed?'<button class="btn primary" type="button" id="pt-up">'+(tp?"Replace template":"Load pay sheet template")+"</button>":"")+"</div></section>"+
+    (tp?'<div class="tablebox"><table class="static"><thead><tr><th>Class</th><th>Position</th><th class="num">Wage (USD/hr)</th></tr></thead><tbody>'+tp.scales.map(x=>'<tr><td class="mono"><b>'+esc(x.cls)+"</b></td><td>"+esc(x.pos)+'</td><td class="mono num">'+money(x.wage)+"</td></tr>").join("")+'</tbody></table></div><p class="sub">Wages come from the template\'s scales tab. To change them, update the template in Excel and load it again.</p>':"");
+  const dl=document.getElementById("pt-dl");if(dl)dl.onclick=()=>openPackage({file:tp.file,name:tp.name},dl);
+  const up=document.getElementById("pt-up");if(up)up.onclick=()=>{const m=modal("Load pay sheet template",'<p class="sub" style="margin:0">Choose the pay sheet workbook (.xlsx) with its scales tab and the weekly pay tab (Name / CLASS / Monday → Sunday with ST, OT, DT, MM, PD).</p><label class="f" for="pt-file">Pay sheet template<input type="file" id="pt-file" accept=".xlsx"></label><div id="pt-prev"></div>','<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="pt-save" disabled>Save template</button>',"wide");
+    let P=null,f=null;m.querySelector("#pt-file").onchange=async ev=>{f=ev.target.files[0];if(!f)return;const pv=m.querySelector("#pt-prev");try{P=await parsePayTemplate(await f.arrayBuffer());pv.innerHTML='<div class="okbox">Pay tab "'+esc(P.tab)+'" · '+P.scales.length+" pay classes · rows "+P.layout.firstRow+"–"+P.layout.lastRow+"</div>"+(P.fixNotes.length?'<div class="banner"><b>Fixed on every published pay sheet:</b><br>'+P.fixNotes.map(esc).join("<br>")+"</div>":"");m.querySelector("#pt-save").disabled=false;}catch(e){P=null;pv.innerHTML='<div class="err">'+esc(errText(e))+"</div>";}};
+    m.querySelector("#pt-save").onclick=e=>busyRun(e.target,m,async()=>{if(!P||!canSave())return;const meta=await storePackage(f);const book=await TMPL.tables(await f.arrayBuffer());const a=await book.get(P.tab);
+      await commitIndex(ix=>{ix.payTpl=Object.assign({file:meta.file,name:f.name,at:new Date().toISOString(),by:S.me.name,title:String(a[0]&&a[0][0]||"")},P);},"Workflow: pay sheet template");closeOverlay();refresh();toast("Pay sheet template saved");});};}
