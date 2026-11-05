@@ -100,6 +100,11 @@ async function pagesOf(file,progress){
       pages.push({width:c.width,words:tessWords(data).map(x=>({t:x.text,x0:x.bbox.x0,y0:x.bbox.y0,x1:x.bbox.x1,y1:x.bbox.y1,conf:x.confidence})),annots:ann.map(a=>annotWords(a,scale))});}
   }
   return{pages,scanned,numPages:doc.numPages};}
+async function pageImages(file,nums,progress){const lib=await getPdfjs();const doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const out={};
+  for(const n of nums){if(n<1||n>doc.numPages)continue;progress&&progress("Saving page "+n+"…");const page=await doc.getPage(n);const v1=page.getViewport({scale:1});const scale=Math.min(2.2,1700/v1.width);const vp=page.getViewport({scale});
+    const c=document.createElement("canvas");c.width=Math.round(vp.width);c.height=Math.round(vp.height);const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);
+    await page.render({canvasContext:g,viewport:vp,canvas:c}).promise;const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.82));if(!blob)throw new Error("Page "+n+" couldn't be saved.");out[n]={blob,w:c.width,h:c.height,taken:""};}
+  return out;}
 async function read(file,progress){const r=await pagesOf(file,progress);const out=parse(r.pages);out.scanned=r.scanned;out.pages=r.numPages;return out;}
 async function readUnitSheets(file,sections,progress){const r=await pagesOf(file,progress);const out=parseUnitSheets(r.pages,sections);out.scanned=r.scanned;return out;}
 
@@ -160,6 +165,6 @@ function parseUnitSheets(pages,sections){
       e.notes=parts.join(" ").trim();}
     res.push(e);});
   return{sheets:res};}
-return{parse,read,readUnitSheets,parseUnitSheets,lines,findHeader};
+return{parse,read,readUnitSheets,parseUnitSheets,pageImages,lines,findHeader};
 })();
 if(typeof module!=="undefined")module.exports=PKG;

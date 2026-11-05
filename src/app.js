@@ -838,12 +838,12 @@ function parseSheetDate(s){s=String(s||"").trim();let m=/^(\d{1,2})[\/\-.](\d{1,
 function matchOtherUnit(text){const n=x=>String(x||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();const t=n(text);if(!t)return null;
   const us=(rates()?rates().units:[]).filter(u=>!CREW_KEYS.has(u.key));
   return us.find(u=>n(u.item)===t)||us.find(u=>n(u.workType+" "+u.item)===t)||us.find(u=>n(u.item).indexOf(t)===0||t.indexOf(n(u.item))===0)||null;}
-function openSheetUpload(jid){
+function openSheetUpload(jid,prefPole){
   if(!can.newSheet()){canSave();return;}
-  const j=jobById(jid);
-  const m=modal("Upload unit sheets — "+j.name,'<p class="sub" style="margin:0">Choose a PDF of filled-out Crew Daily Unit Checklists (the sheets printed from this job). Each page becomes one unit sheet for its location. Check every quantity against the paper before you submit — handwriting can be misread.</p>'+
+  const j=jobById(jid);const ref=isTeJob(j);
+  const m=modal("Upload unit sheets — "+j.name,'<p class="sub" style="margin:0">'+(ref?"Choose a PDF of filled-out Crew Daily Unit Checklists. It can hold many locations: each page is matched to its location by the ticket ID / location # and kept on that location with its units. <b>Reference only — this job bills T&amp;E, so these are not billed.</b> Pages that can't be matched can be assigned by hand.":"Choose a PDF of filled-out Crew Daily Unit Checklists (the sheets printed from this job). Each page becomes one unit sheet for its location. Check every quantity against the paper before you submit — handwriting can be misread.")+"</p>"+
     '<div class="row-inline"><label class="btn primary" for="su-file" style="cursor:pointer">Choose PDF<input type="file" id="su-file" accept="application/pdf,.pdf" hidden></label><span class="sub" id="su-info"></span></div><div id="su-warn"></div><div id="su-list"></div>',
-    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="su-save" disabled>Submit to CM</button>',"wide");
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="su-save" disabled>'+(ref?"Save unit sheets":"Submit to CM")+"</button>","wide");
   m.style.width="min(1100px,calc(100% - 24px))";
   let file=null,entries=[];const info=m.querySelector("#su-info"),list=m.querySelector("#su-list");
   const poles=(j.poles||[]).slice().sort((a,b)=>(a.n||0)-(b.n||0));
@@ -859,35 +859,37 @@ function openSheetUpload(jid){
         (e.warn.length?'<div class="banner">'+e.warn.map(esc).join("<br>")+"</div>":"")+
         '<table class="su-units"><tbody>'+lines.map(k=>'<tr><td>'+esc((opts.find(o=>o[0]===k)||[k,unitInfo(k).item])[1])+'</td><td><input type="number" step="any" min="0" inputmode="decimal" data-q="'+esc(k)+'" value="'+esc(e.qty[k])+'"></td><td><button class="btn sm danger" type="button" data-rmq="'+esc(k)+'" aria-label="Remove unit">✕</button></td></tr>').join("")+
         '<tr><td><select data-addk><option value="">+ Add a unit…</option>'+opts.filter(o=>!(o[0] in e.qty)).map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+"</option>").join("")+'</select></td><td></td><td></td></tr></tbody></table>'+
-        photoSlotsHtml("su"+i,needPhotos())+
+        (ref?"":photoSlotsHtml("su"+i,needPhotos()))+
         '<label class="f wide">Notes / extras / difficulty justification<textarea data-k="notes">'+esc(e.notes)+"</textarea></label></div>";}).join("");
-    list.querySelectorAll(".su-card").forEach(card=>{const e=entries[+card.dataset.i];bindPhotoSlots(card,e.slots);
+    list.querySelectorAll(".su-card").forEach(card=>{const e=entries[+card.dataset.i];if(!ref)bindPhotoSlots(card,e.slots);
       card.querySelector("[data-inc]").onchange=ev=>{e.include=ev.target.checked;card.classList.toggle("off",!e.include);upd();};
       card.querySelectorAll("[data-k]").forEach(el=>{el[el.tagName==="SELECT"?"onchange":"oninput"]=()=>{e[el.dataset.k]=el.value;upd();};});
       card.querySelectorAll("[data-q]").forEach(el=>el.oninput=()=>{e.qty[el.dataset.q]=el.value;});
       card.querySelectorAll("[data-rmq]").forEach(b=>b.onclick=()=>{delete e.qty[b.dataset.rmq];draw();});
       card.querySelector("[data-addk]").onchange=ev=>{if(ev.target.value){e.qty[ev.target.value]="";draw();}};});
     upd();}
-  function upd(){const n=entries.filter(e=>e.include).length;const b=m.querySelector("#su-save");b.textContent="Submit "+n+" sheet"+(n===1?"":"s")+" to CM";b.disabled=!n;}
+  function upd(){const n=entries.filter(e=>e.include).length;const b=m.querySelector("#su-save");b.textContent=ref?"Save "+n+" unit sheet"+(n===1?"":"s"):"Submit "+n+" sheet"+(n===1?"":"s")+" to CM";b.disabled=!n;}
   m.querySelector("#su-file").onchange=async ev=>{const f=ev.target.files[0];ev.target.value="";if(!f)return;
     if(f.size>PKG_MAX){toast(f.name+" is larger than 25 MB.",7000);return;}
     file=f;entries=[];list.innerHTML="";info.textContent="Reading "+f.name+"…";m.querySelector("#su-warn").innerHTML="";
     try{const r=await PKG.readUnitSheets(f,CREW_SECTIONS,msg=>{info.textContent=msg;});
       const warn=[];if(r.scanned)warn.push("Scanned pages are read with text recognition. Handwritten numbers are often misread, so check every quantity.");
       if(!r.sheets.length)warn.push("No Crew Daily Unit Checklist pages were found in this PDF.");
-      entries=r.sheets.map(s=>{const byT=s.ticket&&poles.find(p=>String(p.ticket).toUpperCase()===s.ticket);const byN=!byT&&s.locNo&&poles.find(p=>String(p.n)===String(s.locNo).trim());const pole=byT||byN||null;
-        const w=s.warn.slice();if(!pole)w.push("Location not matched (ticket \""+(s.ticket||"blank")+"\") — pick it from the list.");else if(!byT)w.push("Matched by location # only — confirm it's the right pole.");
+      entries=r.sheets.map(s=>{const byT=s.ticket&&poles.find(p=>String(p.ticket).toUpperCase()===s.ticket);const nz=v=>String(v||"").toUpperCase().replace(/[^A-Z0-9]/g,"");const byN=!byT&&s.locNo&&poles.find(p=>String(p.n)===String(s.locNo).trim());const pOk=x=>!!(x&&x.esPole&&nz(x.esPole).length>=2&&nz(s.pole).indexOf(nz(x.esPole))>=0);
+        const byE=!byT&&!byN&&s.pole?(()=>{const c=poles.filter(pOk);return c.length===1?c[0]:null;})():null;const byP=!byT&&!byN&&!byE&&prefPole&&r.sheets.length===1?poleById(j,prefPole):null;const pole=byT||byN||byE||byP||null;
+        const w=s.warn.slice();if(!pole)w.push("Location not matched (ticket \""+(s.ticket||"blank")+"\") — pick it from the list.");else if(byP)w.push("Not matched from the sheet — assigned to the location you opened. Confirm it.");else if(byE)w.push("Matched by pole # only — confirm it's the right location.");else if(byN&&!pOk(byN))w.push("Matched by location # only — confirm it's the right pole.");
         const qty={};Object.keys(s.qty).forEach(k=>qty[k]=s.qty[k]);
         s.others.forEach(o=>{const u=matchOtherUnit(o.text);if(u)qty[u.key]=(Number(qty[u.key])||0)+o.qty;else w.push('Other unit "'+o.text+'" ('+o.qty+") isn't on the rate list — add the right unit by hand.");});
-        const workDate=parseSheetDate(s.date);if(s.date&&!workDate)w.push('Date "'+s.date+'" couldn\'t be read.');if(!s.date)w.push("No date on the sheet — it can be filled in later (optional).");if(!String(s.crew||"").trim())w.push("No crew / lead on the sheet — it can be uploaded and filled in later (required before CM sign-off).");
+        const workDate=parseSheetDate(s.date);if(s.date&&!workDate)w.push('Date "'+s.date+'" couldn\'t be read.');if(!s.date)w.push("No date on the sheet — it can be filled in later (optional).");if(!ref&&!String(s.crew||"").trim())w.push("No crew / lead on the sheet — it can be uploaded and filled in later (required before CM sign-off).");
         if(!Object.keys(qty).length)w.push("No unit quantities were read from this page.");
-        const dup=pole&&!!workDate&&sheets().some(x=>x.jobId===j.id&&x.poleId===pole.id&&x.workDate===workDate);if(dup)w.push("This location already has a unit sheet for this date.");
-        return{slots:{before:{},after:{}},page:s.page,include:!!pole&&Object.keys(qty).length>0&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet,notes:s.notes,qty,warn:w};});
+        const dup=pole&&!!workDate&&(ref?(j.unitRefs||[]).some(x=>x.poleId===pole.id&&x.workDate===workDate):sheets().some(x=>x.jobId===j.id&&x.poleId===pole.id&&x.workDate===workDate));if(dup)w.push("This location already has a unit sheet for this date.");
+        return{slots:{before:{},after:{}},page:s.page,include:!!pole&&(ref||Object.keys(qty).length>0)&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet,notes:s.notes,qty,warn:w};});
       info.textContent=f.name+": "+entries.length+" sheet page(s) found";
       m.querySelector("#su-warn").innerHTML=warn.length?'<div class="banner">'+warn.map(esc).join("<br>")+"</div>":"";draw();}
     catch(e){info.textContent="";toast("Couldn't read the PDF: "+errText(e),10000);}};
   m.querySelector("#su-save").onclick=e=>busyRun(e.target,m,async()=>{
     const sel=entries.filter(x=>x.include);
+    if(ref)return saveUnitRefs(j,file,sel,e.target);
     for(const x of sel){if(!x.poleId)throw new Error("Page "+x.page+": pick the location.");
       const ks=Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!=="");if(!ks.length)throw new Error("Page "+x.page+": no unit quantities.");
       for(const k of ks){const q=Number(x.qty[k]);if(!isFinite(q)||q<0)throw new Error("Page "+x.page+": "+unitInfo(k).item+" quantity isn't a number.");}
@@ -900,6 +902,21 @@ function openSheetUpload(jid){
       const id=await createDoc("sheet",doc,"Uploaded from "+src.name+" page "+x.page+" ("+lines.length+" unit line(s))");if(id)made++;else fails.push(x.page);}
     closeOverlay();refresh();toast(made+" unit sheet(s) submitted to the CM"+(fails.length?". Pages not saved: "+fails.join(", "):""),9000);});
 }
+
+/* T&E jobs: unit sheets kept per location for reference (never billed) — stored on the job in the index, page image + source PDF in data/files */
+async function saveUnitRefs(j,file,sel,btn){
+  for(const x of sel){if(!x.poleId)throw new Error("Page "+x.page+": pick the location.");
+    for(const k of Object.keys(x.qty)){const v=String(x.qty[k]).trim();if(v!==""&&(!isFinite(Number(v))||Number(v)<0))throw new Error("Page "+x.page+": "+unitInfo(k).item+" quantity isn't a number.");}}
+  if(!canSave())return;
+  btn.textContent="Saving PDF…";const src=await storePackage(file);
+  const imgs=await PKG.pageImages(file,[...new Set(sel.map(x=>x.page))],msg=>{btn.textContent=msg;});
+  const pageMeta={};for(const n of Object.keys(imgs)){btn.textContent="Uploading page "+n+"…";pageMeta[n]=await storePhoto(imgs[n],"page");}
+  const at=new Date().toISOString();
+  const recs=sel.map(x=>({id:"ur-"+hexId(8),poleId:x.poleId,page:x.page,img:pageMeta[x.page]||null,src:{file:src.file,name:src.name,size:src.size},workDate:x.workDate||"",crew:String(x.crew||"").trim(),wo:String(x.wo||"").trim(),fwo:String(x.fwo||"").trim(),awc:String(x.awc||"").trim(),poleSet:x.poleSet||"",notes:String(x.notes||"").trim(),
+    lines:Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!==""&&Number(x.qty[k])>0).map(k=>({key:k,qty:Number(x.qty[k])})),by:S.me.name,byKey:S.myKey,at}));
+  await commitIndex(ix=>{const jj=ix.jobs.find(y=>y.id===j.id);if(!jj)throw new Error("This job was removed.");const live=new Set((jj.poles||[]).map(p=>p.id));const ok=recs.filter(r=>live.has(r.poleId));
+    (jj.unitRefs=jj.unitRefs||[]).push(...ok);(jj.log=jj.log||[]).push({t:at,by:S.me.name,text:"Unit sheets (reference) uploaded from "+src.name+": "+ok.length+" page(s), "+new Set(ok.map(r=>r.poleId)).size+" location(s)"});},"Workflow: T&E unit sheets (reference)");
+  closeOverlay();refresh();toast(recs.length+" unit sheet"+(recs.length===1?"":"s")+" saved to "+new Set(recs.map(r=>r.poleId)).size+" location(s)",7000);}
 
 /* ---------- location grid (Add Job / Add locations) ---------- */
 const LOC_COLS=[["ticket","Ticket ID","w-s"],["town","Town","w-s"],["street","Street *","w-l"],["esPole","ES pole # *","w-s"],["vzPole","VZ pole #","w-xs"],["pdfPage","PDF page","w-xs"],["woJob","WO / Job #","w-s"],["area","Pricing area","area"],["dateSet","Date set","w-s"],["notes","Notes","w-l"]];
