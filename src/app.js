@@ -55,7 +55,7 @@ const crewCell=d=>String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req
 /* what a sheet still needs before the Construction Manager can sign it */
 /* Crew / lead is required before CM sign-off. Work date is optional on unit sheets; T&E timesheets need it because it sets the rate year. */
 const signGaps=d=>[d.kind==="te"&&!d.workDate?"work date":"",!String(d.crew||"").trim()?"crew / lead":""].filter(Boolean);
-function sheetPoleText(d){if(d.kind==="te"&&!d.poleId)return"T&E timesheet (no location)";const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
+function sheetPoleText(d){if(d.kind==="te"&&d.weekly)return teWeekText(d);if(d.kind==="te"&&!d.poleId)return"T&E timesheet (no location)";const j=jobById(d.jobId);const p=poleById(j,d.poleId);return p?poleLabel(p):(d.poleText?d.poleText+" (not on packet list)":"—");}
 
 /* ---------- crypto (same scheme as the AP Invoice Tracker) ---------- */
 const subtle=crypto.subtle,te=new TextEncoder(),td=new TextDecoder();
@@ -373,7 +373,7 @@ function renderSheets(){
   const all=visibleSheets();
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
-  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button>'+(jobs().some(j=>isTeJob(j)&&!j.archived)?'<button class="btn primary big w-only" type="button" id="cta-te">+ New T&amp;E timesheet</button>':"")+'</div></div>':'<a class="back" href="#overview">← Overview</a>')+
+  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
     '<h2 class="sec">Workflow</h2><section class="tiles">'+
     tile("Awaiting CM",cnt(ST.SUB),"Sheets to review",false)+tile("Returned to field",cnt(ST.RET),"Sent back for fixes",cnt(ST.RET)>0)+
     tile("Ready to bill",cnt(ST.OK)+cnt(ST.GF),"Signed by the CM",false)+tile("Invoiced",cnt(ST.INV),"On an invoice",false)+"</section>"+
@@ -381,7 +381,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
-  const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");const ctt=document.getElementById("cta-te");if(ctt)ctt.onclick=()=>openTeForm(null);
+  const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));
   const q=document.getElementById("f-q"),st=document.getElementById("f-st"),jb=document.getElementById("f-job");st.value=S.f.status;jb.value=S.f.job;
   q.oninput=()=>{S.f.q=q.value;fill();};st.onchange=()=>{S.f.status=st.value;fill();};jb.onchange=()=>{S.f.job=jb.value;fill();};
@@ -417,7 +417,8 @@ function renderSheet(){
   if(!d||d.type!=="sheet"||(role()==="crew"&&d.createdByKey!==S.myKey)){main.innerHTML='<a class="back" href="#sheets">← Sheets</a><div class="empty"><b>Sheet not found</b>It may have been removed.</div>';return;}
   const j=jobById(d.jobId);const p=poleById(j,d.poleId);const id=S.docId;
   const acts=[];
-  if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
+  if(isTe(d)){if(d.status!==ST.INV&&(can.setup()||canGfSign()))acts.push('<button class="btn" type="button" id="a-edit">Per diem, lodging &amp; subs</button>');}
+  else if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
   if(can.hold(d))acts.push('<button class="btn" type="button" id="a-hold">'+(d.hold&&d.hold.on?"Release hold":"Hold")+"</button>");
   if(can.gf(d))acts.push('<button class="btn danger" type="button" id="a-gfret">Return to field</button><button class="btn primary" type="button" id="a-gfok">CM sign &amp; approve</button>');
   if(can.bill(d))acts.push('<button class="btn danger" type="button" id="a-bret">Return</button><button class="btn primary" type="button" id="a-bok">Approve for invoice</button>');
@@ -436,7 +437,7 @@ function renderSheet(){
   fillPhotoImgs(main);main.querySelectorAll("[data-open-photo]").forEach(a=>a.onclick=ev=>{ev.preventDefault();openPhoto(d,a.dataset.openPhoto);});
   const on=(sel,fn)=>{const b=document.getElementById(sel);if(b)b.onclick=fn;};
   const guard=want=>x=>{if(x.status!==want)throw new Error("This sheet was already moved to "+(ST_LABEL[x.status]||x.status)+" by someone else.");};
-  on("a-edit",()=>isTe(d)?openTeForm(id):openSheetForm(id));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));on("a-scan",()=>openPackage(d.scan,document.getElementById("a-scan")));
+  on("a-edit",()=>isTe(d)?openTeExtras(id):openSheetForm(id));on("a-src",()=>openPackage(d.source,document.getElementById("a-src")));on("a-scan",()=>openPackage(d.scan,document.getElementById("a-scan")));
   on("a-hold",()=>{const h=d.hold&&d.hold.on;confirmBox(h?"Release hold on "+d.no+"?":"Put "+d.no+" on hold?",h?"The sheet continues through approval.":"The sheet stays where it is but is flagged and can't be invoiced until the hold is released.",h?"Release hold":"Hold",async n=>{
     await commitDoc(id,x=>{x.hold=h?{on:false}:{on:true,note:n,by:S.me.name,at:new Date().toISOString()};},h?"Hold released"+(n?": "+n:""):"Put on hold: "+n);},{note:h?"Note":"Reason for hold",noteReq:!h});});
   on("a-gfok",()=>openGfSign([id]));
@@ -499,11 +500,7 @@ function openPhoto(d,k){const m=d.photos&&d.photos[k];if(!m)return;
 function openSheetForm(id,presetJob,only){
   if(id==null&&!can.newSheet()){canSave();return;}
   const src=id?S.docs.get(id):null;
-  if(src&&isTe(src))return openTeForm(id);if(!id&&presetJob&&isTeJob(jobById(presetJob)))return openTeForm(null,presetJob);
-  if(!id&&!presetJob&&only!=="units"){const hasTe=jobs().some(j=>isTeJob(j)&&!j.archived),hasU=jobs().some(j=>!isTeJob(j)&&!j.archived);
-    if(hasTe&&!hasU)return openTeForm(null);
-    if(hasTe&&hasU){const c=modal("New sheet",'<p class="sub" style="margin:0">Which kind of job is this for?</p><div class="row-inline"><button class="btn primary big" type="button" id="ns-u">Unit sheet</button><button class="btn primary big" type="button" id="ns-t">T&amp;E timesheet</button></div>','<button class="btn" type="button" data-x>Cancel</button>');
-      c.querySelector("#ns-u").onclick=()=>{closeOverlay();openSheetForm(null,null,"units");};c.querySelector("#ns-t").onclick=()=>{closeOverlay();openTeForm(null);};return;}}
+  if(src&&isTe(src))return;if(!id&&presetJob&&isTeJob(jobById(presetJob))){toast("T&E jobs use the weekly timesheet upload on the job page.",6000);return;}
   const d=src?JSON.parse(JSON.stringify(src)):{jobId:"",poleId:"",poleText:"",workDate:todayStr(),crew:(S.me&&S.me.crew)||(role()==="crew"?S.me.name:""),awc:"",wo:"",fwo:"",poleSet:"",notes:"",lines:[]};
   if(!id&&presetJob)d.jobId=presetJob;
   const act=jobs().filter(j=>!isTeJob(j)&&(!j.archived||j.id===d.jobId));
@@ -646,7 +643,7 @@ function drawUbl(){
 function jobStats(j,ss){
   const mine=ss.filter(s=>s.jobId===j.id);const by=st=>mine.filter(s=>s.status===st).length;
   const locs=j.poles||[];const started=new Set(mine.map(s=>s.poleId).filter(Boolean));
-  const doneLocs=locs.filter(p=>{const sh=mine.filter(s=>s.poleId===p.id);return isTeJob(j)?teLocStatus(sh)[0]==="Complete":sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV);}).length;
+  const doneLocs=locs.filter(p=>{const sh=mine.filter(s=>s.poleId===p.id);return isTeJob(j)?!!p.teDone:sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV);}).length;
   let appr=0,apprOk=true;mine.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceSheet(s).total;if(t==null)apprOk=false;else appr+=t;});
   return{locs:locs.length,started:started.size,doneLocs,sub:by(ST.SUB),ret:by(ST.RET),gf:by(ST.GF),ok:by(ST.OK)+by(ST.GF),inv:by(ST.INV),hold:mine.filter(s=>s.hold&&s.hold.on).length,appr,apprOk,sheets:mine.length};}
 function renderOverview(){
