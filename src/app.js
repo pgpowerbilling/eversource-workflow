@@ -336,15 +336,15 @@ function route(){
   else if(h.indexOf("jobedit-")===0){S.view="jobedit";S.docId=h.slice(8);}
   else if(h.indexOf("roster-")===0){S.view="roster";S.docId=h.slice(7);}
   else if(h.indexOf("job-")===0){const id=h.slice(4);if(S.view!=="job"||S.docId!==id){S.jobTab=null;S.pf={q:"",st:""};}S.view="job";S.docId=id;}
-  else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets","rosters"].includes(h))S.view=h;else S.view="overview";
-  if(role()==="crew"&&!["sheet","job","roster"].includes(S.view))S.view="sheets";
+  else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets","rosters","jobs","paysheets","shutdowns"].includes(h))S.view=h;else S.view="overview";
+  if(role()==="crew"&&!["sheet","job","roster","jobs","paysheets","shutdowns"].includes(S.view))S.view="sheets";
   if(["roster","rosters"].includes(S.view)&&!canRosters())S.view="overview";
   if(S.view!=="roster")S.rEdit=null;  /* General Foremen: their own sheets + job pages (no pricing) */
   if(S.view==="rates"&&!canRates())S.view="overview";
   if(["invoices","invoice"].includes(S.view)&&!can.seeInvoices())S.view="overview";
   if(S.view==="ubl"&&!canUbl())S.view="overview";
   if(S.view==="timesheets"&&!canPayroll())S.view="overview";
-  const nav=role()==="crew"?"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob",roster:"rosters"}[S.view]||S.view;
+  const nav=role()==="crew"?(["jobs","paysheets","shutdowns"].includes(S.view)?S.view:"sheets"):S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob",roster:"rosters"}[S.view]||S.view;
   if(S.view!=="jobedit")S.jobEdit=null;
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});
   refresh();window.scrollTo(0,0);
@@ -355,12 +355,12 @@ function refresh(){
   if(!S.loaded)return;
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   set("ct-jobs",jobs().filter(j=>!j.archived).length||"");
-  set("ct-ready",sheets().filter(isReady).length||"");set("ct-ts",sheets().filter(s=>isTe(s)&&s.status===ST.SUB).length||"");
+  set("ct-ready",sheets().filter(isReady).length||"");set("ct-ts",sheets().filter(s=>isTe(s)&&s.status===ST.SUB).length||"");set("ct-sd",jobs().filter(j=>!j.archived).reduce((a,j)=>a+(j.poles||[]).filter(sdOn).length,0)||"");
   document.getElementById("btn-new").hidden=!can.newSheet();
   document.querySelectorAll("[data-nav=rates]").forEach(a=>a.hidden=!canRates());document.querySelectorAll("[data-nav=invoices]").forEach(a=>a.hidden=!can.seeInvoices());document.querySelectorAll("[data-nav=ubl]").forEach(a=>a.hidden=!canUbl());document.querySelectorAll("[data-nav=timesheets]").forEach(a=>a.hidden=!canPayroll());document.querySelectorAll("[data-nav=rosters]").forEach(a=>a.hidden=!canRosters()||role()==="crew");
   const v=S.view;
   if(v==="sheet")renderSheet();else if(v==="invoice")renderInvoice();else if(v==="invoices")renderInvoices();
-  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else if(v==="timesheets")renderTimesheets();else if(v==="roster")renderRoster();else if(v==="rosters")renderRosters();else renderOverview();
+  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else if(v==="timesheets")renderTimesheets();else if(v==="roster")renderRoster();else if(v==="rosters")renderRosters();else if(v==="jobs")renderJobsList();else if(v==="paysheets")renderPaysheets();else if(v==="shutdowns")renderShutdowns();else renderOverview();
 }
 
 /* ---------- pricing (rates from the template's Unit Rate Master; no rounding until display / final total) ---------- */
@@ -383,10 +383,7 @@ function renderSheets(){
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
   main.innerHTML=(crew?'<div class="cta"><div><b>Unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
-    (crew?'<div id="ro-home"></div><div id="ro-pays"></div>':"")+
-    (crew?(()=>{const sx=sheets();const js=jobs().filter(j=>!j.archived&&!j.test);if(!js.length)return"";
-      return'<h2 class="sec">My jobs</h2><p class="sub" style="margin:-4px 0 8px">Open a job to mark locations Shutdown'+(js.some(isTeJob)?", upload weekly timesheets or mark T&amp;E locations complete":"")+'.</p><div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Shutdown</th></tr></thead><tbody id="my-jobs">'+
-        js.map(j=>{const st=jobStats(j,sx);return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||""].filter(Boolean).join(" · "))+'</div></td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+'</td><td>'+st.doneLocs+"/"+st.locs+'<div class="sub">'+esc(progSub(st))+"</div></td><td>"+(st.shut?'<span class="chip c-bad">'+st.shut+" shutdown</span>"+(st.shutNext?' <span class="sub">next '+esc(fmtD(st.shutNext))+"</span>":""):"")+"</td></tr>";}).join("")+"</tbody></table></div>";})():"")+
+    (crew?'<div id="ro-home"></div>':"")+
     (crew?"":'<h2 class="sec">Workflow</h2><section class="tiles">'+
     tile("Awaiting CM",cnt(ST.SUB),"Sheets to review",false)+tile("Returned to field",cnt(ST.RET),"Sent back for fixes",cnt(ST.RET)>0)+
     tile("Ready to bill",cnt(ST.OK)+cnt(ST.GF),"Signed by the CM",false)+tile("Invoiced",cnt(ST.INV),"On an invoice",false)+"</section>")+
@@ -394,7 +391,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
-  if(crew){renderRosterWeek(document.getElementById("ro-home"),S.myKey);roPayList(document.getElementById("ro-pays"),S.myKey);}
+  if(crew)renderRosterWeek(document.getElementById("ro-home"),S.myKey);
   const mj=document.getElementById("my-jobs");if(mj)bindRows(mj,id=>location.hash="job-"+id);
   const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));

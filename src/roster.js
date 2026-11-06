@@ -243,3 +243,60 @@ function roPayList(host,gfKey){if(!host)return;
     tb.querySelectorAll("[data-pf]").forEach(b=>b.onclick=()=>openPackage(all[+b.dataset.pf].file,b));
     tb.querySelectorAll("[data-po]").forEach(b=>b.onclick=()=>{const [k,j]=b.dataset.po.split("-").map(Number);openPackage(all[k].older[j].file,b);});};
   fill();const q=host.querySelector("#pl-q");if(q)q.oninput=()=>{f.q=q.value;fill();};}
+
+/* ---------- Jobs / Paysheets / Shutdowns tabs (everyone) ---------- */
+function renderJobsList(){const f=S.jlf||(S.jlf={q:"",st:"active",bill:""});const ss=sheets();
+  main.innerHTML='<section class="jobhead"><div><h1>Jobs</h1><div class="meta"><span>Search every job and open it</span></div></div></section>'+
+    '<div class="filters"><input type="search" id="jl-q" placeholder="Search job, WO, PO, town, CM, pole #, street…" aria-label="Search jobs" value="'+esc(f.q)+'">'+
+    '<select id="jl-st" aria-label="Status"><option value="active"'+(f.st==="active"?" selected":"")+'>Active</option><option value="archived"'+(f.st==="archived"?" selected":"")+'>Archived</option><option value=""'+(f.st===""?" selected":"")+">All</option></select>"+
+    '<select id="jl-bill" aria-label="Billing"><option value="">Units and T&amp;E</option><option value="units"'+(f.bill==="units"?" selected":"")+'>Units</option><option value="te"'+(f.bill==="te"?" selected":"")+">T&amp;E</option></select><span class=\"count\" id=\"jl-c\"></span></div>"+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Billing</th><th class="nosort">WO / PO</th><th class="nosort">CM</th><th class="nosort num">Locations</th><th class="nosort">Progress</th><th class="nosort">Shutdown</th></tr></thead><tbody id="jl-b"></tbody></table></div>';
+  const fill=()=>{const q=f.q.trim().toLowerCase();
+    const L=jobs().filter(j=>!j.test&&(f.st===""||(f.st==="archived")===!!j.archived)&&(!f.bill||(f.bill==="te")===isTeJob(j))&&
+      (!q||[j.name,j.wo,j.po,j.town,j.gf,j.customer,j.desc].concat((j.poles||[]).map(p=>p.esPole+" "+p.street+" "+(p.ticket||"")+" "+(p.woJob||""))).join(" ").toLowerCase().indexOf(q)>=0)).sort((a,b)=>a.name.localeCompare(b.name));
+    document.getElementById("jl-c").textContent=L.length+" job"+(L.length===1?"":"s");
+    const tb=document.getElementById("jl-b");
+    tb.innerHTML=L.map(j=>{const st=jobStats(j,ss);return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.customer,j.town].filter(Boolean).join(" · "))+(j.archived?' <span class="chip">Archived</span>':"")+"</div></td><td>"+(isTeJob(j)?'<span class="chip c-sch">T&amp;E</span>':"Units")+'</td><td class="mono sub">'+esc([j.wo?"WO "+j.wo:"",j.po?"PO "+j.po:""].filter(Boolean).join(" · "))+"</td><td>"+esc(j.gf||"")+'</td><td class="mono num">'+st.locs+"</td><td>"+st.doneLocs+"/"+st.locs+'<div class="sub">'+esc(progSub(st))+"</div></td><td>"+(st.shut?'<span class="chip c-bad">'+st.shut+" shutdown</span>"+(st.shutNext?'<div class="sub">next '+esc(fmtD(st.shutNext))+"</div>":""):'<span class="sub">—</span>')+"</td></tr>";}).join("")||
+      '<tr><td colspan="7"><div class="empty"><b>No jobs match</b></div></td></tr>';
+    bindRows(tb,id=>location.hash="job-"+id);};
+  fill();document.getElementById("jl-q").oninput=e=>{f.q=e.target.value;fill();};document.getElementById("jl-st").onchange=e=>{f.st=e.target.value;fill();};document.getElementById("jl-bill").onchange=e=>{f.bill=e.target.value;fill();};}
+
+/* every saved pay sheet: built from daily rosters, or published from a T&E weekly timesheet */
+function paysheetRecs(){const crew=role()==="crew";const out=[];
+  Object.values((S.index&&S.index.rosterPay)||{}).forEach(r=>{if(crew&&r.gfKey!==S.myKey)return;out.push({kind:"Daily rosters",week:r.weekStart,who:r.gfName||"",rec:r,older:r.older||[]});});
+  sheets().filter(s=>isTe(s)&&s.paySheet).forEach(s=>{if(crew&&s.createdByKey!==S.myKey)return;out.push({kind:"T&E timesheet "+s.no,week:s.weekStart,who:s.gf||s.createdBy||"",job:(jobById(s.jobId)||{}).name||"",rec:s.paySheet,older:[],sheet:s.id});});
+  return out.sort((a,b)=>String(b.week).localeCompare(String(a.week))||a.who.localeCompare(b.who));}
+function renderPaysheets(){const f=S.psf||(S.psf={q:""});const all=paysheetRecs();
+  main.innerHTML='<section class="jobhead"><div><h1>Paysheets</h1><div class="meta"><span>'+(role()==="crew"?"Your saved pay sheets":"Every saved pay sheet")+" — newest week first</span></div></div></section>"+
+    '<div class="filters"><input type="search" id="pf-q" placeholder="Search week, name, file, timesheet #…" aria-label="Search pay sheets" value="'+esc(f.q)+'"><span class="count" id="pf-c"></span></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Week</th><th class="nosort">General Foreman</th><th class="nosort">Built from</th><th class="nosort num">People</th><th class="nosort num">Hours</th><th class="nosort num">Total pay (USD)</th><th class="nosort num">Per diem (USD)</th><th class="nosort">Published</th><th class="nosort">File</th></tr></thead><tbody id="pf-b"></tbody></table></div>';
+  const fill=()=>{const q=f.q.trim().toLowerCase();const L=all.filter(x=>!q||[fmtD(x.week),x.week,x.who,x.kind,x.job,x.rec.file&&x.rec.file.name,x.rec.by].join(" ").toLowerCase().indexOf(q)>=0);
+    document.getElementById("pf-c").textContent=L.length+" of "+all.length;const tb=document.getElementById("pf-b");
+    tb.innerHTML=L.map(x=>{const t=x.rec.totals||{};const k=all.indexOf(x);
+      return"<tr><td><b>"+esc(fmtD(x.week))+" – "+esc(fmtD(addDays(x.week,5)))+"</b></td><td>"+esc(x.who)+"</td><td>"+(x.sheet?'<a href="#sheet-'+esc(x.sheet)+'">'+esc(x.kind)+"</a>"+(x.job?'<div class="sub">'+esc(x.job)+"</div>":""):esc(x.kind))+'</td><td class="mono num">'+((x.rec.rows||[]).length)+'</td><td class="mono num">'+fmtN(t.hours||0)+'</td><td class="mono num">'+money(t.pay||0)+'</td><td class="mono num">'+money(t.perDiem||0)+'</td><td class="sub">'+esc(x.rec.by||"")+"<br>"+esc(fmtT(x.rec.at||""))+'</td><td><button class="btn sm" type="button" data-pf="'+k+'">Download</button>'+
+        (x.older.length?'<details style="margin-top:4px"><summary class="sub">'+x.older.length+" earlier version"+(x.older.length===1?"":"s")+"</summary>"+x.older.map((o,j)=>({o,j})).reverse().map(({o,j})=>'<div style="margin-top:4px"><button class="btn sm" type="button" data-po="'+k+"-"+j+'">'+esc(fmtT(o.at))+'</button> <span class="sub">'+money((o.totals||{}).pay||0)+"</span></div>").join("")+"</details>":"")+"</td></tr>";}).join("")||
+      '<tr><td colspan="9"><div class="empty"><b>'+(all.length?"No pay sheets match":"No pay sheets yet")+"</b>"+(all.length?"":"Pay sheets are saved here when they're created from the daily rosters or a T&amp;E timesheet.")+"</div></td></tr>";
+    tb.querySelectorAll("[data-pf]").forEach(b=>b.onclick=()=>openPackage(all[+b.dataset.pf].rec.file,b));
+    tb.querySelectorAll("[data-po]").forEach(b=>b.onclick=()=>{const [k,j]=b.dataset.po.split("-").map(Number);openPackage(all[k].older[j].file,b);});};
+  fill();document.getElementById("pf-q").oninput=e=>{f.q=e.target.value;fill();};}
+
+/* every location on shutdown, all jobs */
+function renderShutdowns(){const f=S.sdf||(S.sdf={q:"",job:"",when:""});
+  const all=[];jobs().filter(j=>!j.archived&&!j.test).forEach(j=>(j.poles||[]).forEach(p=>{if(sdOn(p))all.push({j,p});}));
+  const today=todayStr();
+  main.innerHTML='<section class="jobhead"><div><h1>Shutdowns</h1><div class="meta"><span>Every location on hold for a shutdown or a scheduled day, all jobs</span></div></div></section>'+
+    '<section class="tiles">'+tile("On shutdown",all.length,all.length?[...new Set(all.map(x=>x.j.id))].length+" job(s)":"None",false)+tile("Scheduled",all.filter(x=>x.p.shutdown.date).length,"Have a date",false)+tile("No date yet",all.filter(x=>!x.p.shutdown.date).length,"Need a date",all.some(x=>!x.p.shutdown.date))+tile("Past due",all.filter(x=>x.p.shutdown.date&&x.p.shutdown.date<today).length,"Date has passed",all.some(x=>x.p.shutdown.date&&x.p.shutdown.date<today))+"</section>"+
+    '<div class="filters"><input type="search" id="sd-q" placeholder="Search pole #, street, town, ticket…" aria-label="Search shutdowns" value="'+esc(f.q)+'"><select id="sd-job" aria-label="Job"><option value="">All jobs</option>'+[...new Map(all.map(x=>[x.j.id,x.j])).values()].map(j=>'<option value="'+esc(j.id)+'"'+(j.id===f.job?" selected":"")+">"+esc(j.name)+"</option>").join("")+'</select><select id="sd-when" aria-label="Date"><option value="">Any date</option><option value="none"'+(f.when==="none"?" selected":"")+'>No date yet</option><option value="past"'+(f.when==="past"?" selected":"")+'>Past due</option><option value="next7"'+(f.when==="next7"?" selected":"")+'>Next 7 days</option></select><span class="count" id="sd-c"></span><button class="btn" type="button" id="sd-csv">Export CSV</button></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Scheduled date</th><th class="nosort">Job</th><th class="nosort">#</th><th class="nosort">Pole # / location</th><th class="nosort">Town</th><th class="nosort">Ticket / WO</th><th class="nosort">Shutdown</th><th class="nosort">Set by</th></tr></thead><tbody id="sd-b"></tbody></table></div>';
+  const rows=()=>{const q=f.q.trim().toLowerCase();const n7=addDays(today,7);return all.filter(({j,p})=>(!f.job||j.id===f.job)&&(!f.when||(f.when==="none"?!p.shutdown.date:f.when==="past"?p.shutdown.date&&p.shutdown.date<today:p.shutdown.date&&p.shutdown.date>=today&&p.shutdown.date<=n7))&&
+      (!q||[j.name,p.esPole,p.street,p.town,p.ticket,p.woJob,p.notes].join(" ").toLowerCase().indexOf(q)>=0)).sort((a,b)=>(a.p.shutdown.date||"9999").localeCompare(b.p.shutdown.date||"9999")||a.j.name.localeCompare(b.j.name)||(a.p.n||0)-(b.p.n||0));};
+  const fill=()=>{const L=rows();document.getElementById("sd-c").textContent=L.length+" of "+all.length;const tb=document.getElementById("sd-b");
+    tb.innerHTML=L.map(({j,p})=>{const d=p.shutdown.date;return'<tr tabindex="0" data-id="'+esc(j.id)+'" data-job="'+esc(j.id)+'"><td>'+(d?"<b"+(d<today?' class="late"':"")+">"+esc(fmtD(d))+"</b>":'<span class="chip c-req">No date</span>')+"</td><td>"+esc(j.name)+'</td><td class="mono">'+esc(p.n)+"</td><td><b>"+esc(p.esPole||"")+"</b> "+esc(p.street||"")+"</td><td>"+esc(p.town||"")+'</td><td class="mono sub">'+esc([p.ticket,p.woJob?"WO "+p.woJob:""].filter(Boolean).join(" · "))+"</td><td>"+shutCell(j,p)+'</td><td class="sub">'+esc(p.shutdown.by||"")+"<br>"+esc(fmtT(p.shutdown.at||""))+"</td></tr>";}).join("")||
+      '<tr><td colspan="8"><div class="empty"><b>'+(all.length?"No shutdowns match":"No locations on shutdown")+"</b>"+(all.length?"":"Tick Shutdown on a location in any job and it shows up here.")+"</div></td></tr>";
+    tb.querySelectorAll("tr[data-job]").forEach(tr=>{tr.querySelectorAll(".sd-cell").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onkeydown=e=>e.stopPropagation();});
+      const jid=tr.dataset.job;tr.querySelectorAll("[data-sd]").forEach(cb=>cb.onchange=()=>saveShut(jid,cb.dataset.sd,cb.checked?{on:true}:null,cb));
+      tr.querySelectorAll("[data-sdd]").forEach(inp=>inp.onchange=()=>saveShut(jid,inp.dataset.sdd,{on:true,date:inp.value},inp));});
+    bindRows(tb,id=>location.hash="job-"+id);};
+  fill();document.getElementById("sd-q").oninput=e=>{f.q=e.target.value;fill();};document.getElementById("sd-job").onchange=e=>{f.job=e.target.value;fill();};document.getElementById("sd-when").onchange=e=>{f.when=e.target.value;fill();};
+  document.getElementById("sd-csv").onclick=()=>{const L=[["Scheduled date","Job","#","Pole #","Street","Town","Ticket","WO","Set by","Set at"]].concat(rows().map(({j,p})=>[p.shutdown.date||"",j.name,p.n,p.esPole,p.street,p.town,p.ticket||"",p.woJob||"",p.shutdown.by||"",(p.shutdown.at||"").slice(0,10)]));
+    download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Shutdowns.csv");};}
