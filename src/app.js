@@ -382,8 +382,8 @@ function renderSheets(){
   const all=visibleSheets();
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
-  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
-    (crew?'<div id="ro-home"></div>':"")+
+  main.innerHTML=(crew?'<div class="cta"><div><b>Unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
+    (crew?'<div id="ro-home"></div><div id="ro-pays"></div>':"")+
     (crew?(()=>{const sx=sheets();const js=jobs().filter(j=>!j.archived&&!j.test);if(!js.length)return"";
       return'<h2 class="sec">My jobs</h2><p class="sub" style="margin:-4px 0 8px">Open a job to mark locations Shutdown'+(js.some(isTeJob)?", upload weekly timesheets or mark T&amp;E locations complete":"")+'.</p><div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Shutdown</th></tr></thead><tbody id="my-jobs">'+
         js.map(j=>{const st=jobStats(j,sx);return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||""].filter(Boolean).join(" · "))+'</div></td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+'</td><td>'+st.doneLocs+"/"+st.locs+'<div class="sub">'+esc(progSub(st))+"</div></td><td>"+(st.shut?'<span class="chip c-bad">'+st.shut+" shutdown</span>"+(st.shutNext?' <span class="sub">next '+esc(fmtD(st.shutNext))+"</span>":""):"")+"</td></tr>";}).join("")+"</tbody></table></div>";})():"")+
@@ -394,7 +394,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
-  if(crew)renderRosterWeek(document.getElementById("ro-home"),S.myKey);
+  if(crew){renderRosterWeek(document.getElementById("ro-home"),S.myKey);roPayList(document.getElementById("ro-pays"),S.myKey);}
   const mj=document.getElementById("my-jobs");if(mj)bindRows(mj,id=>location.hash="job-"+id);
   const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));
@@ -441,7 +441,7 @@ function renderSheet(){
   if(d.status===ST.INV&&d.invoiceId&&can.seeInvoices())acts.push('<a class="btn" href="#inv-'+esc(d.invoiceId)+'">Open invoice '+esc(d.invoiceNo||"")+"</a>");
   const ret=d.status===ST.RET&&d.returnNote?'<div class="banner bad"><b>Returned by '+esc(d.returnedBy||"")+":</b> "+esc(d.returnNote)+"</div>":"";
   const hold=d.hold&&d.hold.on?'<div class="banner"><b>On hold — '+esc(d.hold.by)+":</b> "+esc(d.hold.note)+"</div>":"";
-  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← My unit sheets</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
+  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← Overview</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
     '<section class="jobhead"><div><h1>'+(isTe(d)?"T&amp;E timesheet ":"Unit sheet ")+esc(d.no)+'</h1><div class="meta">'+stChip(d)+"<span>"+esc(j?j.name:"(job removed)")+"</span><span>"+esc(fmtD(d.workDate))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
     '<section class="details">'+(isTe(d)?teDetailsHtml(d)+"</section>"+teBodyHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d):dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+
       dl("Pole # / location",esc(p?p.esPole+" — "+p.street+", "+p.town:(d.poleText?d.poleText+" (not on packet list)":"")),true)+
@@ -802,7 +802,7 @@ function renderJobPage(){
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
-function fixBack(){if(role()!=="crew")return;const b=main.querySelector("a.back");if(b){b.href="#sheets";b.textContent="← My unit sheets";}}
+function fixBack(){if(role()!=="crew")return;const b=main.querySelector("a.back");if(b){b.href="#sheets";b.textContent="← Overview";}}
 
 /* ---------- printable crew daily unit checklist (one page per location) ---------- */
 function unitSheetPage(j,p,i,n){

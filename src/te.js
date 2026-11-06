@@ -639,7 +639,7 @@ function renderTimesheets(){
   const by=st=>all.filter(s=>s.status===st).length;
   main.innerHTML='<section class="jobhead"><div><h1>Timesheets</h1><div class="meta"><span>Every submitted T&amp;E timesheet, all jobs</span></div></div></section>'+
     '<section class="tiles">'+tile("Timesheets",all.length,all.length?"Latest "+teWeekText(all.slice().sort((a,b)=>String(b.workDate).localeCompare(String(a.workDate)))[0]):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"To review",by(ST.SUB)>0)+tile("Returned to field",by(ST.RET),"Need a corrected upload",by(ST.RET)>0)+tile("Ready to bill",all.filter(isReady).length,"Signed by the CM",false)+tile("Invoiced",by(ST.INV),"On invoices",false)+tile("Pay sheets",all.filter(s=>s.paySheet).length+" / "+all.length,"Published",false)+"</section>"+
-    '<div id="ro-admin"></div>'+
+    '<div id="ro-admin"></div><div id="ro-pays"></div>'+
     '<div class="filters"><input type="search" id="ts-q" placeholder="Search timesheet #, foreman, WO, person…" aria-label="Search timesheets" value="'+esc(f.q)+'">'+
     '<select id="ts-job" aria-label="Job"><option value="">All jobs</option>'+jl.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===f.job?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select>"+
     '<select id="ts-st" aria-label="Status"><option value="">All statuses</option>'+[ST.SUB,ST.RET,"ready",ST.INV].map(x=>'<option value="'+x+'"'+(x===f.st?" selected":"")+">"+esc(x==="ready"?"Ready to bill":ST_LABEL[x]||x)+"</option>").join("")+"</select>"+
@@ -654,7 +654,7 @@ function renderTimesheets(){
       (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td><td>"+(s.paySheet?'<span class="chip c-done">Published</span>':'<span class="sub">—</span>')+'</td><td class="mono">'+esc(s.invoiceNo||"")+'</td><td class="sub">'+esc((s.createdBy||"")+" · "+fmtD((s.submittedAt||s.createdAt||"").slice(0,10)))+"</td></tr>";}).join("")||
       '<tr><td colspan="10"><div class="empty"><b>'+(all.length?"No timesheets match the filters":"No timesheets yet")+"</b>"+(all.length?"":"Weekly timesheets appear here once they're uploaded on a T&amp;E job.")+"</div></td></tr>";
     bindRows(tb,id=>location.hash="sheet-"+id);}
-  roAdminSection(document.getElementById("ro-admin"));
+  roAdminSection(document.getElementById("ro-admin"));roPayList(document.getElementById("ro-pays"),null);
   const on=(id,ev,fn)=>{document.getElementById(id)[ev]=fn;};
   on("ts-q","oninput",e=>{f.q=e.target.value;fill();});on("ts-job","onchange",e=>{f.job=e.target.value;fill();});on("ts-st","onchange",e=>{f.st=e.target.value;fill();});on("ts-pay","onchange",e=>{f.pay=e.target.value;fill();});
   on("ts-csv","onclick",()=>{const L=[["Timesheet #","Job","Week start","Week end","Foreman","General Foreman","WO","FWO","People","Labor hrs","Equipment"].concat(priced?["Amount (USD)"]:[]).concat(["Status","Pay sheet","Invoice #","Submitted by","Submitted"])];

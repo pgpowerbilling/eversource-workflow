@@ -387,7 +387,7 @@ table.static thead th[colspan]{text-transform:none;letter-spacing:.01em;font-siz
   <div class="navrow"><div class="wrap">
     <nav class="tabs" aria-label="Views">
       <a href="#overview" data-nav="overview" class="nocrew">Overview<span class="ct" id="ct-jobs"></span></a>
-      <a href="#sheets" data-nav="sheets" class="crew-only">My unit sheets</a>
+      <a href="#sheets" data-nav="sheets" class="crew-only">Overview</a>
       <a href="#addjob" data-nav="addjob" class="nocrew bill-only">Add Job</a>
       <a href="#invoices" data-nav="invoices" class="nocrew">Invoices<span class="ct" id="ct-ready"></span></a>
       <a href="#timesheets" data-nav="timesheets" class="nocrew">Payroll<span class="ct" id="ct-ts" title="Awaiting CM signature"></span></a>
@@ -1104,8 +1104,8 @@ function renderSheets(){
   const all=visibleSheets();
   const cnt=s=>all.filter(x=>x.status===s).length;
   const crew=role()==="crew";
-  main.innerHTML=(crew?'<div class="cta"><div><b>My unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
-    (crew?'<div id="ro-home"></div>':"")+
+  main.innerHTML=(crew?'<div class="cta"><div><b>Unit sheets</b><span class="sub">Fill out one sheet per location and submit it. Your Construction Manager signs it off.</span></div><div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn big w-only" type="button" id="cta-upl">Upload filled sheets</button><button class="btn primary big w-only" type="button" id="cta-new">+ New unit sheet</button></div></div>':'<a class="back" href="#overview">← Overview</a>')+
+    (crew?'<div id="ro-home"></div><div id="ro-pays"></div>':"")+
     (crew?(()=>{const sx=sheets();const js=jobs().filter(j=>!j.archived&&!j.test);if(!js.length)return"";
       return'<h2 class="sec">My jobs</h2><p class="sub" style="margin:-4px 0 8px">Open a job to mark locations Shutdown'+(js.some(isTeJob)?", upload weekly timesheets or mark T&amp;E locations complete":"")+'.</p><div class="tablebox"><table><thead><tr><th class="nosort">Job</th><th class="nosort">Locations</th><th class="nosort">Progress</th><th class="nosort">Shutdown</th></tr></thead><tbody id="my-jobs">'+
         js.map(j=>{const st=jobStats(j,sx);return'<tr tabindex="0" data-id="'+esc(j.id)+'"><td><div class="job-name">'+esc(j.name)+'</div><div class="sub">'+esc([j.wo?"WO "+j.wo:"",j.town||""].filter(Boolean).join(" · "))+'</div></td><td class="mono">'+st.locs+(isTeJob(j)?' <span class="chip c-sch">T&amp;E</span>':"")+'</td><td>'+st.doneLocs+"/"+st.locs+'<div class="sub">'+esc(progSub(st))+"</div></td><td>"+(st.shut?'<span class="chip c-bad">'+st.shut+" shutdown</span>"+(st.shutNext?' <span class="sub">next '+esc(fmtD(st.shutNext))+"</span>":""):"")+"</td></tr>";}).join("")+"</tbody></table></div>";})():"")+
@@ -1116,7 +1116,7 @@ function renderSheets(){
     '<select id="f-st" aria-label="Status"><option value="open">All open (not invoiced)</option><option value="">All sheets</option>'+[ST.SUB,ST.RET,ST.OK,ST.INV].map(s=>'<option value="'+s+'">'+esc(ST_LABEL[s])+"</option>").join("")+'<option value="hold">On hold</option></select>'+
     '<select id="f-job" aria-label="Job"><option value="">All jobs</option>'+jobs().map(j=>'<option value="'+esc(j.id)+'">'+esc(j.name)+"</option>").join("")+'</select><span class="count" id="f-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">Sheet #</th><th class="nosort">Work date</th><th class="nosort">Job</th><th class="nosort">Pole / location</th><th class="nosort">Crew / lead</th><th class="nosort">Units</th>'+(can.seePrice()?'<th class="nosort num">Amount</th>':"")+'<th class="nosort">Status</th><th class="nosort">Last update</th></tr></thead><tbody id="tb"></tbody></table></div><div id="gf-bulk" hidden></div>';
-  if(crew)renderRosterWeek(document.getElementById("ro-home"),S.myKey);
+  if(crew){renderRosterWeek(document.getElementById("ro-home"),S.myKey);roPayList(document.getElementById("ro-pays"),S.myKey);}
   const mj=document.getElementById("my-jobs");if(mj)bindRows(mj,id=>location.hash="job-"+id);
   const cta=document.getElementById("cta-new");if(cta)cta.onclick=()=>openSheetForm(null,null,"units");
   const cu=document.getElementById("cta-upl");if(cu)cu.onclick=()=>pickJob(id=>openSheetUpload(id));
@@ -1163,7 +1163,7 @@ function renderSheet(){
   if(d.status===ST.INV&&d.invoiceId&&can.seeInvoices())acts.push('<a class="btn" href="#inv-'+esc(d.invoiceId)+'">Open invoice '+esc(d.invoiceNo||"")+"</a>");
   const ret=d.status===ST.RET&&d.returnNote?'<div class="banner bad"><b>Returned by '+esc(d.returnedBy||"")+":</b> "+esc(d.returnNote)+"</div>":"";
   const hold=d.hold&&d.hold.on?'<div class="banner"><b>On hold — '+esc(d.hold.by)+":</b> "+esc(d.hold.note)+"</div>":"";
-  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← My unit sheets</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
+  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← Overview</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
     '<section class="jobhead"><div><h1>'+(isTe(d)?"T&amp;E timesheet ":"Unit sheet ")+esc(d.no)+'</h1><div class="meta">'+stChip(d)+"<span>"+esc(j?j.name:"(job removed)")+"</span><span>"+esc(fmtD(d.workDate))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
     '<section class="details">'+(isTe(d)?teDetailsHtml(d)+"</section>"+teBodyHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d):dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+
       dl("Pole # / location",esc(p?p.esPole+" — "+p.street+", "+p.town:(d.poleText?d.poleText+" (not on packet list)":"")),true)+
@@ -1524,7 +1524,7 @@ function renderJobPage(){
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
-function fixBack(){if(role()!=="crew")return;const b=main.querySelector("a.back");if(b){b.href="#sheets";b.textContent="← My unit sheets";}}
+function fixBack(){if(role()!=="crew")return;const b=main.querySelector("a.back");if(b){b.href="#sheets";b.textContent="← Overview";}}
 
 /* ---------- printable crew daily unit checklist (one page per location) ---------- */
 function unitSheetPage(j,p,i,n){
@@ -2717,7 +2717,7 @@ function renderTimesheets(){
   const by=st=>all.filter(s=>s.status===st).length;
   main.innerHTML='<section class="jobhead"><div><h1>Timesheets</h1><div class="meta"><span>Every submitted T&amp;E timesheet, all jobs</span></div></div></section>'+
     '<section class="tiles">'+tile("Timesheets",all.length,all.length?"Latest "+teWeekText(all.slice().sort((a,b)=>String(b.workDate).localeCompare(String(a.workDate)))[0]):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"To review",by(ST.SUB)>0)+tile("Returned to field",by(ST.RET),"Need a corrected upload",by(ST.RET)>0)+tile("Ready to bill",all.filter(isReady).length,"Signed by the CM",false)+tile("Invoiced",by(ST.INV),"On invoices",false)+tile("Pay sheets",all.filter(s=>s.paySheet).length+" / "+all.length,"Published",false)+"</section>"+
-    '<div id="ro-admin"></div>'+
+    '<div id="ro-admin"></div><div id="ro-pays"></div>'+
     '<div class="filters"><input type="search" id="ts-q" placeholder="Search timesheet #, foreman, WO, person…" aria-label="Search timesheets" value="'+esc(f.q)+'">'+
     '<select id="ts-job" aria-label="Job"><option value="">All jobs</option>'+jl.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===f.job?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select>"+
     '<select id="ts-st" aria-label="Status"><option value="">All statuses</option>'+[ST.SUB,ST.RET,"ready",ST.INV].map(x=>'<option value="'+x+'"'+(x===f.st?" selected":"")+">"+esc(x==="ready"?"Ready to bill":ST_LABEL[x]||x)+"</option>").join("")+"</select>"+
@@ -2732,7 +2732,7 @@ function renderTimesheets(){
       (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td><td>"+(s.paySheet?'<span class="chip c-done">Published</span>':'<span class="sub">—</span>')+'</td><td class="mono">'+esc(s.invoiceNo||"")+'</td><td class="sub">'+esc((s.createdBy||"")+" · "+fmtD((s.submittedAt||s.createdAt||"").slice(0,10)))+"</td></tr>";}).join("")||
       '<tr><td colspan="10"><div class="empty"><b>'+(all.length?"No timesheets match the filters":"No timesheets yet")+"</b>"+(all.length?"":"Weekly timesheets appear here once they're uploaded on a T&amp;E job.")+"</div></td></tr>";
     bindRows(tb,id=>location.hash="sheet-"+id);}
-  roAdminSection(document.getElementById("ro-admin"));
+  roAdminSection(document.getElementById("ro-admin"));roPayList(document.getElementById("ro-pays"),null);
   const on=(id,ev,fn)=>{document.getElementById(id)[ev]=fn;};
   on("ts-q","oninput",e=>{f.q=e.target.value;fill();});on("ts-job","onchange",e=>{f.job=e.target.value;fill();});on("ts-st","onchange",e=>{f.st=e.target.value;fill();});on("ts-pay","onchange",e=>{f.pay=e.target.value;fill();});
   on("ts-csv","onclick",()=>{const L=[["Timesheet #","Job","Week start","Week end","Foreman","General Foreman","WO","FWO","People","Labor hrs","Equipment"].concat(priced?["Amount (USD)"]:[]).concat(["Status","Pay sheet","Invoice #","Submitted by","Submitted"])];
@@ -2804,7 +2804,7 @@ function roPaySheet(gfKey,ws){const days=roWeekDays(ws);const list=roWeek(gfKey,
   const pkey=gfKey+"|"+ws;const gfName=roGfName(gfKey);
   const d={no:"the daily rosters ("+list.length+" day"+(list.length===1?"":"s")+")",labor:agg.labor,days,weekStart:ws,weekEnd:days[5],jobId:null};
   openPaySheet(null,{d,prev:(S.index.rosterPay||{})[pkey],fname:gfName+" Paysheet "+((iso=>{const[y,mo,da]=iso.split("-");return(+mo)+"-"+(+da)+"-"+y.slice(2);})(ws))+".xlsx",
-    save:async rec=>{rec.rosters=list.map(r=>r.id);rec.gfKey=gfKey;rec.gfName=gfName;rec.weekStart=ws;await commitIndex(ix=>{ix.rosterPay=ix.rosterPay||{};ix.rosterPay[pkey]=rec;},"Workflow: roster pay sheet");return true;}});}
+    save:async rec=>{rec.rosters=list.map(r=>r.id);rec.gfKey=gfKey;rec.gfName=gfName;rec.weekStart=ws;await commitIndex(ix=>{ix.rosterPay=ix.rosterPay||{};const old=ix.rosterPay[pkey];if(old){rec.older=(old.older||[]).concat([{file:old.file,at:old.at,by:old.by,totals:old.totals}]);}ix.rosterPay[pkey]=rec;},"Workflow: roster pay sheet");return true;}});}
 
 /* weekly T&E timesheet for one job from the week's rosters → goes to CM sign-off like an uploaded one */
 async function roMakeTe(gfKey,ws,jobId,btn){const j=jobById(jobId);const days=roWeekDays(ws);const list=roWeek(gfKey,ws);const agg=roAggregate(list,days,jobId);
@@ -2837,7 +2837,7 @@ function renderRoster(){
   const empty=!d.crews.some(c=>c.workers.length||c.equip.length);const showStart=ed&&!st.id&&!st.started&&empty;
   const tj=jobs().filter(j=>!j.archived&&isTeJob(j));
   const hrsIn=(k,v,lab,i,ci)=>'<input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-ci="'+ci+'" data-wi="'+i+'" data-h="'+k+'" value="'+esc(v)+'" aria-label="'+lab+'"'+(ed?"":" disabled")+">";
-  main.innerHTML='<a class="back" href="'+back+'">← '+(role()==="crew"?"My unit sheets":"Rosters")+"</a>"+
+  main.innerHTML='<a class="back" href="'+back+'">← '+(role()==="crew"?"Overview":"Rosters")+"</a>"+
     '<section class="jobhead"><div><h1>Roster — '+esc(roDay(d.date))+(d.weather?" "+wxChip:"")+'</h1><div class="meta"><span>General Foreman '+esc(d.gfName)+"</span>"+(st.id?"<span>Saved "+esc(fmtT((S.docs.get(st.id)||{}).updatedAt||""))+"</span>":'<span class="chip c-sch">Not saved yet</span>')+"</div></div>"+
       '<div class="acts">'+(ed&&st.id?'<button class="btn" type="button" id="ro-del">Delete roster</button>':"")+"</div></section>"+
     '<div class="ro-wx'+(d.weather?" on":"")+'"><label class="chk" style="margin:0"><input type="checkbox" id="ro-wx"'+(d.weather?" checked":"")+(ed?"":" disabled")+'> <b>Inclement Weather Day</b></label><span class="sub">'+(d.weather?"Everyone is paid 2 ST hours and equipment is at 0 hours. Logged as an Inclement Weather Day.":"Tick if the crew was sent home for weather: pay changes to 2 ST hours.")+"</span></div>"+
@@ -2969,6 +2969,22 @@ function renderRosters(){
   document.getElementById("rs-day").onchange=e=>{if(e.target.value){S.roDay=e.target.value;renderRosters();}};
   main.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{location.hash="roster-"+b.dataset.open;});
   roAdminSection(document.getElementById("rs-wk"));}
+
+/* Saved pay sheets built from daily rosters: GF home (own) and Payroll tab (all) */
+function roPayList(host,gfKey){if(!host)return;
+  const all=Object.values((S.index&&S.index.rosterPay)||{}).filter(r=>!gfKey||r.gfKey===gfKey).sort((a,b)=>String(b.weekStart).localeCompare(String(a.weekStart))||String(a.gfName).localeCompare(String(b.gfName)));
+  const f=S.payF||(S.payF={q:""});
+  const rows=()=>{const q=f.q.trim().toLowerCase();return all.filter(r=>!q||[r.gfName,fmtD(r.weekStart),r.file&&r.file.name].join(" ").toLowerCase().indexOf(q)>=0);};
+  host.innerHTML='<h2 class="sec">Pay sheets</h2>'+(all.length>6?'<div class="filters"><input type="search" id="pl-q" placeholder="Search week or name…" aria-label="Search pay sheets" value="'+esc(f.q)+'"></div>':"")+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">Week</th>'+(gfKey?"":'<th class="nosort">General Foreman</th>')+'<th class="nosort">People</th><th class="nosort num">Hours</th><th class="nosort num">Total pay</th><th class="nosort num">Per diem</th><th class="nosort">Published</th><th class="nosort">File</th></tr></thead><tbody id="pl-b"></tbody></table></div>';
+  const fill=()=>{const L=rows();const tb=host.querySelector("#pl-b");
+    tb.innerHTML=L.map((r,i)=>{const t=r.totals||{};const k=all.indexOf(r);
+      return"<tr><td><b>"+esc(fmtD(r.weekStart))+" – "+esc(fmtD(addDays(r.weekStart,5)))+"</b></td>"+(gfKey?"":"<td>"+esc(r.gfName||"")+"</td>")+'<td class="mono">'+((r.rows||[]).length)+'</td><td class="mono num">'+fmtN(t.hours||0)+'</td><td class="mono num">'+money(t.pay||0)+'</td><td class="mono num">'+money(t.perDiem||0)+'</td><td class="sub">'+esc(r.by)+"<br>"+esc(fmtT(r.at))+(r.older&&r.older.length?"<br>"+r.older.length+" earlier version"+(r.older.length===1?"":"s"):"")+'</td><td><button class="btn sm" type="button" data-pf="'+k+'">Download</button>'+
+        (r.older&&r.older.length?'<details style="margin-top:4px"><summary class="sub">Earlier versions</summary>'+r.older.slice().reverse().map((o,j)=>'<div style="margin-top:4px"><button class="btn sm" type="button" data-po="'+k+"-"+(r.older.length-1-j)+'">'+esc(fmtT(o.at))+"</button> "+'<span class="sub">'+money((o.totals||{}).pay||0)+"</span></div>").join("")+"</details>":"")+"</td></tr>";}).join("")||
+      '<tr><td colspan="'+(gfKey?7:8)+'"><div class="empty"><b>No pay sheets yet</b>Use "Create pay sheet for the week" on the daily rosters. Each one is saved here.</div></td></tr>';
+    tb.querySelectorAll("[data-pf]").forEach(b=>b.onclick=()=>openPackage(all[+b.dataset.pf].file,b));
+    tb.querySelectorAll("[data-po]").forEach(b=>b.onclick=()=>{const [k,j]=b.dataset.po.split("-").map(Number);openPackage(all[k].older[j].file,b);});};
+  fill();const q=host.querySelector("#pl-q");if(q)q.oninput=()=>{f.q=q.value;fill();};}
 
 initLogin();
 window.__wf={S,priceSheet,buildInvoice,priceTe,sheets};
