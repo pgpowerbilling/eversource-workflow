@@ -39,8 +39,13 @@ const cents=x=>Math.round((Number(x)+Number.EPSILON)*100)/100;
 const money=v=>S.hidePrices?"$ •••":v==null||!isFinite(v)?"—":Number(v).toLocaleString("en-US",{style:"currency",currency:"USD"});
 function newId(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 let toastT;function toast(msg,ms){let t=document.getElementById("toast");if(!t){t=document.createElement("div");t.id="toast";t.className="toast";t.setAttribute("role","status");document.body.appendChild(t);}t.textContent=msg;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,ms||3500);}
-const jobs=()=>(S.index&&S.index.jobs)||[];
-const jobById=id=>jobs().find(j=>j.id===id)||null;
+const allJobs=()=>(S.index&&S.index.jobs)||[];
+/* General Foremen only see the jobs assigned to them */
+const jobAssigned=j=>!!j&&(j.gfKeys||[]).includes(S.myKey);
+const jobs=()=>S.me&&role()==="crew"?allJobs().filter(jobAssigned):allJobs();
+const jobById=id=>allJobs().find(j=>j.id===id)||null;
+const gfLogins=()=>{const p=(S.index&&S.index.profiles)||{};return Object.keys(p).filter(k=>p[k].role==="crew").map(k=>({key:k,name:p[k].name})).sort((a,b)=>a.name.localeCompare(b.name));};
+const gfAssignedNames=j=>(j.gfKeys||[]).map(k=>{const p=S.index.profiles&&S.index.profiles[k];return p?p.name:null;}).filter(Boolean);
 const poleById=(j,pid)=>j&&(j.poles||[]).find(p=>p.id===pid)||null;
 const poleLabel=p=>p?(p.street+" · "+p.esPole+(p.ticket?" · "+p.ticket:"")):"";
 const rates=()=>(S.index&&S.index.rates)||null;
@@ -342,6 +347,7 @@ function route(){
   else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets","rosters","jobs","paysheets","shutdowns"].includes(h))S.view=h;else S.view="overview";
   if(role()==="crew"&&!["sheet","job","roster","jobs","paysheets","shutdowns"].includes(S.view))S.view="sheets";
   if(["roster","rosters"].includes(S.view)&&!canRosters())S.view="overview";
+  if(S.view==="job"&&role()==="crew"&&!jobAssigned(jobById(S.docId))){S.view="sheets";setTimeout(()=>toast("That job isn\u2019t assigned to you."),50);}
   if(S.view!=="roster")S.rEdit=null;  /* General Foremen: their own sheets + job pages (no pricing) */
   if(S.view==="rates"&&!canRates())S.view="overview";
   if(["invoices","invoice"].includes(S.view)&&!can.seeInvoices())S.view="overview";
@@ -759,7 +765,17 @@ function openGfSign(ids){
 }
 
 /* ---------- job page: locations + unit sheets ---------- */
-function renderJob(){renderJobPage();fixBack();}
+function renderJob(){renderJobPage();fixBack();jobGfBar();}
+function jobGfBar(){const j=jobById(S.docId);if(!j||role()==="crew")return;const head=main.querySelector(".jobhead");if(!head)return;
+  const meta=head.querySelector(".meta");const nm=gfAssignedNames(j);if(meta){const s=document.createElement("span");s.innerHTML=nm.length?"GF "+esc(nm.join(", ")):'<span class="chip c-req">No GF assigned</span>';meta.appendChild(s);}
+  const acts=head.querySelector(".acts");if(acts&&can.setup()){const b=document.createElement("button");b.className="btn";b.type="button";b.textContent="Assign GFs";b.onclick=()=>openAssignGfs(j.id);acts.insertBefore(b,acts.firstChild);}}
+function openAssignGfs(jobId){const j=jobById(jobId);if(!j||!can.setup())return;const gl=gfLogins();const cur=j.gfKeys||[];
+  const m=modal("Assign General Foremen — "+j.name,'<p class="sub" style="margin:0 0 8px">General Foremen only see jobs assigned to them: the job page, its locations, unit sheets, rosters and shutdowns.</p>'+
+    (gl.length?'<div class="ulist">'+gl.map(g=>'<label class="u" style="grid-template-columns:auto 1fr;cursor:pointer"><input type="checkbox" data-g="'+esc(g.key)+'"'+(cur.includes(g.key)?" checked":"")+"><span><b>"+esc(g.name)+'</b> <span class="sub">'+allJobs().filter(x=>!x.archived&&(x.gfKeys||[]).includes(g.key)).length+" active job(s)</span></span></label>").join("")+"</div>":'<p class="sub">No General Foreman logins yet. Add them under Logins with the General Foreman role.</p>'),
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="ag-save"'+(gl.length?"":" disabled")+">Save</button>");
+  m.querySelector("#ag-save").onclick=e=>busyRun(e.target,m,async()=>{const keys=[...m.querySelectorAll("[data-g]:checked")].map(x=>x.dataset.g);if(!canSave())return;
+    await commitIndex(ix=>{const t=(ix.jobs||[]).find(x=>x.id===jobId);if(!t)throw new Error("This job was removed.");t.gfKeys=keys;(t.log=t.log||[]).push({t:new Date().toISOString(),by:S.me.name,text:"General Foremen assigned: "+(keys.map(k=>(ix.profiles[k]||{}).name).filter(Boolean).join(", ")||"none")});},"Workflow: assign General Foremen");
+    closeOverlay();refresh();toast(keys.length?"Assigned "+keys.length+" General Foreman"+(keys.length===1?"":"s"):"No General Foremen assigned");});}
 function renderJobPage(){
   const j=jobById(S.docId);
   if(!j){main.innerHTML='<a class="back" href="#overview">← Overview</a><div class="empty"><b>Job not found</b></div>';return;}
@@ -1012,8 +1028,8 @@ function checkLocs(rows,existing){
     const t=L.ticket.trim().toUpperCase();if(t){if(seen.has(t))errs.push("Row "+(i+1)+": Ticket "+L.ticket+" is already on this job.");seen.add(t);}});
   return{used:used.map(L=>{const o={};Object.keys(L).forEach(k=>{if(k[0]!=="_")o[k]=String(L[k]==null?"":L[k]).trim();});return o;}),errs};}
 /* ---------- job fields (Add Job form + Edit job) ---------- */
-const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teSet","T&E pricing *","teset"],["teArea","Service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["desc","Description","textarea",true]];
-const blankJob=()=>({name:"",billing:"units",teSet:"",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
+const JOB_FIELDS=[["name","Job name *","text",true],["billing","Billing type *","billing"],["teSet","T&E pricing *","teset"],["teArea","Service area *","tearea"],["customer","Customer (bill to) *","text"],["po","PO","text"],["wo","WO / Job #","text"],["town","Town / service area","text"],["gf","Construction Manager","gf"],["estStart","Est. start","date"],["estFinish","Est. finish","date"],["area","Default pricing area","area"],["gfKeys","General Foremen assigned (only they see this job)","gfkeys",true],["desc","Description","textarea",true]];
+const blankJob=()=>({gfKeys:[],name:"",billing:"units",teSet:"",teArea:"",customer:"Eversource",po:"",wo:"",town:"",gf:"",estStart:"",estFinish:"",area:"",desc:""});
 function gfNames(){const p=(S.index&&S.index.profiles)||{};return Object.values(p).filter(x=>x.role==="gf").map(x=>x.name).sort();}
 function jobFieldsHtml(pre,v){
   return JOB_FIELDS.map(([k,l,t,wide])=>{const id=pre+"-"+k;const val=v[k]==null?"":v[k];
@@ -1021,10 +1037,11 @@ function jobFieldsHtml(pre,v){
     if(t==="billing")return'<label class="f" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-billsel><option value="units"'+(val!=="te"?" selected":"")+'>Units (unit sheets)</option><option value="te"'+(val==="te"?" selected":"")+">T&amp;E (time &amp; equipment)</option></select></label>";
     if(t==="teset"){const ss=teSets();return'<label class="f" data-bill="te" for="'+id+'">'+esc(l)+'<select id="'+id+'" data-tesetsel><option value="">'+(ss.length?"Select pricing…":"None loaded yet (Rates tab)")+"</option>"+ss.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===val||(!val&&ss.length===1)?" selected":"")+">"+esc(x.name)+"</option>").join("")+"</select></label>";}
     if(t==="tearea")return'<label class="f" data-bill="te" data-tearea for="'+id+'">'+esc(l)+'<select id="'+id+'" data-val="'+esc(val)+'"></select></label>';
+    if(t==="gfkeys"){const gl=gfLogins();const cur=Array.isArray(v.gfKeys)?v.gfKeys:[];return'<fieldset class="f wide gfk" id="'+id+'"><legend style="font-size:13px;font-weight:600;padding:0">'+esc(l)+'</legend>'+(gl.length?gl.map(g=>'<label class="chk" style="display:inline-flex;gap:6px;margin:4px 14px 0 0"><input type="checkbox" data-gfk value="'+esc(g.key)+'"'+(cur.includes(g.key)?" checked":"")+">"+esc(g.name)+"</label>").join(""):'<span class="sub">No General Foreman logins yet (add them under Logins).</span>')+"</fieldset>";}
     if(t==="textarea")return'<label class="f wide" for="'+id+'">'+esc(l)+'<textarea id="'+id+'">'+esc(val)+"</textarea></label>";
     if(t==="gf")return'<label class="f" for="'+id+'">'+esc(l)+'<input id="'+id+'" list="'+pre+'-gfl" value="'+esc(val)+'" autocomplete="off"><datalist id="'+pre+'-gfl">'+gfNames().map(n=>"<option>"+esc(n)+"</option>").join("")+"</datalist></label>";
     return'<label class="f'+(wide?" wide":"")+'" for="'+id+'">'+esc(l)+'<input id="'+id+'"'+(t==="date"?' type="date"':"")+' value="'+esc(val)+'"></label>';}).join("");}
-function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k])=>{const el=root.querySelector("#"+pre+"-"+k);v[k]=el?el.value.trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te"){v.teSet="";v.teArea="";}else{const ts=teSetById(v.teSet);if(!ts||teAreaFree(ts))v.teArea="";}return v;}
+function readJobFields(root,pre){const v={};JOB_FIELDS.forEach(([k,,t])=>{const el=root.querySelector("#"+pre+"-"+k);if(t==="gfkeys"){v[k]=el?[...el.querySelectorAll("[data-gfk]:checked")].map(x=>x.value):[];return;}v[k]=el?String(el.value||"").trim():"";});if(!v.billing)v.billing="units";if(v.billing!=="te"){v.teSet="";v.teArea="";}else{const ts=teSetById(v.teSet);if(!ts||teAreaFree(ts))v.teArea="";}return v;}
 function bindBilling(root){const sel=root.querySelector("[data-billsel]");if(!sel)return;const ts=root.querySelector("[data-tesetsel]"),aw=root.querySelector("[data-tearea]");const asel=aw&&aw.querySelector("select");
   const upd=()=>{const te=sel.value==="te";root.querySelectorAll("[data-bill]").forEach(el=>{el.hidden=el.dataset.bill!==(te?"te":"units");});
     if(aw){const set=ts?teSetById(ts.value):null;const need=te&&set&&!teAreaFree(set);aw.hidden=!need;if(need){const cur=asel.value||asel.dataset.val;asel.innerHTML='<option value="">— pick —</option>'+set.areas.map(a=>"<option"+(a===cur?" selected":"")+">"+esc(a)+"</option>").join("");}}};
@@ -1069,7 +1086,7 @@ function renderAddJobForm(){
     '<h2 class="sec">Job package &amp; locations</h2><div id="aj-grid"></div>'+
     '<div class="row-inline" style="justify-content:flex-end;margin-top:4px"><span class="err" id="aj-err" role="alert" style="margin:0 auto 0 0"></span><button class="btn" type="button" id="aj-cancel">Cancel</button><button class="btn primary" type="button" id="aj-save">Create job</button></div>';
   main.querySelectorAll("[id^=aj-]").forEach(el=>{if(!/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.closest("#aj-grid"))return;const ev=el.tagName==="SELECT"?"onchange":"oninput";el[ev]=()=>{st.f[el.id.slice(3)]=el.value;};});
-  locGrid(document.getElementById("aj-grid"),st);bindBilling(main);
+  locGrid(document.getElementById("aj-grid"),st);bindBilling(main);main.querySelectorAll("[data-gfk]").forEach(cb=>cb.onchange=()=>{st.f.gfKeys=[...main.querySelectorAll("[data-gfk]:checked")].map(x=>x.value);});
   document.getElementById("aj-cancel").onclick=()=>{const dirty=st.rows.length||st.f.name||st.pkgFile;if(dirty&&!confirm("Discard this job?"))return;S.addJob=null;location.hash="addjob";};
   document.getElementById("aj-save").onclick=async e=>{const err=document.getElementById("aj-err");err.textContent="";const b=e.target;
     const v=readJobFields(main,"aj");const fe=jobFieldErr(v);if(fe){err.textContent=fe;return;}v.test=!!document.getElementById("aj-test").checked;
@@ -1110,7 +1127,7 @@ function renderJobEdit(){
     '<div class="row-inline" style="justify-content:flex-end;margin-top:4px"><span class="err" id="je-err" role="alert" style="margin:0 auto 0 0"></span><button class="btn" type="button" id="je-cancel">Cancel</button><button class="btn primary" type="button" id="je-save">Save changes</button></div>';
   main.querySelectorAll("[id^=je-]").forEach(el=>{if(!/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.id==="je-arch"||el.id==="je-test")return;el[el.tagName==="SELECT"?"onchange":"oninput"]=()=>{st.f[el.id.slice(3)]=el.value;};});
   document.getElementById("je-arch").onchange=e=>{st.archived=e.target.checked;};document.getElementById("je-test").onchange=e=>{st.test=e.target.checked;};
-  locGrid(document.getElementById("je-grid"),st);bindBilling(main);
+  locGrid(document.getElementById("je-grid"),st);bindBilling(main);main.querySelectorAll("[data-gfk]").forEach(cb=>cb.onchange=()=>{st.f.gfKeys=[...main.querySelectorAll("[data-gfk]:checked")].map(x=>x.value);});
   document.getElementById("je-cancel").onclick=()=>{S.jobEdit=null;location.hash="job-"+j.id;};
   document.getElementById("je-save").onclick=async e=>{const err=document.getElementById("je-err");err.textContent="";const b=e.target;
     const v=readJobFields(main,"je");const fe=jobFieldErr(v,j.id);if(fe){err.textContent=fe;return;}v.archived=st.archived;v.test=st.test;
