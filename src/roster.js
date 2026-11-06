@@ -41,7 +41,7 @@ function renderRosterWeek(host,gfKey){
         (r?'<div class="sub">'+c.crews+" crew"+(c.crews===1?"":"s")+" · "+c.people+" people · "+c.equip+" equipment</div>"+'<div class="sub">'+fmtN(c.hrs)+' labor hrs</div><button class="btn sm" type="button" data-open="'+esc(r.id)+'">'+(ed?"Open / edit":"View")+"</button>"
           :(ed?'<button class="btn sm primary" type="button" data-new="'+esc(d)+'">+ Create roster</button>':'<div class="sub">No roster</div>'))+"</div>";}).join("")+"</div>"+
     '<div class="ro-acts">'+
-      (list.length?'<button class="btn'+(pay?"":" primary")+'" type="button" id="ro-pay">'+(pay?"Republish pay sheet":"Create pay sheet for the week")+"</button>"+(pay?'<button class="btn" type="button" id="ro-paydl">Download pay sheet</button><span class="sub">Published by '+esc(pay.by)+" · "+esc(fmtT(pay.at))+(can.seePrice()||role()!=="crew"?" · total pay "+money(pay.totals.pay):"")+"</span>":""):'<span class="sub">Create a roster for each day worked. The pay sheet for the week is built from them.</span>')+
+      (!(role()==="crew"||canPayroll())?(list.length?"":'<span class="sub">No rosters this week.</span>'):list.length?'<button class="btn'+(pay?"":" primary")+'" type="button" id="ro-pay">'+(pay?"Republish pay sheet":"Create pay sheet for the week")+"</button>"+(pay?'<button class="btn" type="button" id="ro-paydl">Download pay sheet</button><span class="sub">Published by '+esc(pay.by)+" · "+esc(fmtT(pay.at))+(can.seePrice()||role()!=="crew"?" · total pay "+money(pay.totals.pay):"")+"</span>":""):'<span class="sub">Create a roster for each day worked. The pay sheet for the week is built from them.</span>')+
     "</div>"+
     (teJobs.length?'<div class="ro-acts">'+teJobs.map(j=>{const s=teFor(j);const locked=s&&![ST.SUB,ST.RET].includes(s.status);
       return'<span class="ro-te"><b>'+esc(j.name)+"</b> (T&amp;E) "+(s?'<a href="#sheet-'+esc(s.id)+'">'+esc(s.no)+"</a> "+stChip(s):"")+(ed&&!locked?' <button class="btn sm" type="button" data-te="'+esc(j.id)+'">'+(s?"Update timesheet from rosters":"Create weekly T&amp;E timesheet")+"</button>":"")+"</span>";}).join("")+"</div>":"")+
@@ -84,14 +84,14 @@ function renderRoster(){
     if(key.indexOf("new-")===0){const [date,gk]=key.slice(4).split("~");const gfKey=gk||S.myKey;const ex=roOf(gfKey,date);if(ex){location.replace("#roster-"+ex.id);return;}
       if(!canRoEdit(gfKey)){main.innerHTML='<div class="empty"><b>Not available</b></div>';return;}
       doc={type:"roster",date,gfKey,gfName:roGfName(gfKey),crews:[{id:newId("c-"),foreman:"",jobId:"",notes:"",workers:[],equip:[]}],notes:""};}
-    else{const d=S.docs.get(key);if(!d||d.type!=="roster"){main.innerHTML='<a class="back" href="#'+(role()==="crew"?"sheets":"timesheets")+'">← Back</a><div class="empty"><b>Roster not found</b></div>';return;}
+    else{const d=S.docs.get(key);if(!d||d.type!=="roster"){main.innerHTML='<a class="back" href="#'+(role()==="crew"?"sheets":"rosters")+'">← Back</a><div class="empty"><b>Roster not found</b></div>';return;}
       if(role()==="crew"&&d.gfKey!==S.myKey){location.hash="sheets";return;}id=key;doc=JSON.parse(JSON.stringify(d));}
     st=S.rEdit={key,id,doc,dirty:false};}
-  const d=st.doc;const ed=canRoEdit(d.gfKey);const back=role()==="crew"?"#sheets":"#timesheets";
+  const d=st.doc;const ed=canRoEdit(d.gfKey);const back=role()==="crew"?"#sheets":"#rosters";
   const prev=rosters().filter(r=>r.gfKey===d.gfKey&&r.date<d.date).sort((a,b)=>b.date.localeCompare(a.date))[0];
   const tj=jobs().filter(j=>!j.archived&&isTeJob(j));
   const hrsIn=(k,v,lab,i,ci)=>'<input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-ci="'+ci+'" data-wi="'+i+'" data-h="'+k+'" value="'+esc(v)+'" aria-label="'+lab+'"'+(ed?"":" disabled")+">";
-  main.innerHTML='<a class="back" href="'+back+'">← '+(role()==="crew"?"My unit sheets":"Payroll")+"</a>"+
+  main.innerHTML='<a class="back" href="'+back+'">← '+(role()==="crew"?"My unit sheets":"Rosters")+"</a>"+
     '<section class="jobhead"><div><h1>Roster — '+esc(roDay(d.date))+'</h1><div class="meta"><span>General Foreman '+esc(d.gfName)+"</span>"+(st.id?"<span>Saved "+esc(fmtT((S.docs.get(st.id)||{}).updatedAt||""))+"</span>":'<span class="chip c-sch">Not saved yet</span>')+"</div></div>"+
       '<div class="acts">'+(ed&&!st.id&&prev&&!d.crews.some(c=>c.workers.length||c.equip.length)?'<button class="btn" type="button" id="ro-copy">Copy crews from '+esc(roDay(prev.date))+"</button>":"")+(ed&&st.id?'<button class="btn" type="button" id="ro-del">Delete roster</button>':"")+"</div></section>"+
     d.crews.map((c,ci)=>{const opts=c.workers.map(w=>w.name);
@@ -195,3 +195,21 @@ function roAdminSection(host){if(!host)return;const prof=(S.index&&S.index.profi
   host.innerHTML='<div class="filters" style="margin-top:6px"><label class="sub" for="ro-gf">General Foreman</label><select id="ro-gf">'+keys.map(k=>'<option value="'+esc(k)+'"'+(k===S.roGf?" selected":"")+">"+esc(roGfName(k))+" ("+rosters().filter(r=>r.gfKey===k).length+" rosters)</option>").join("")+'</select></div><div id="ro-adm-wk"></div>';
   host.querySelector("#ro-gf").onchange=e=>{S.roGf=e.target.value;roAdminSection(host);};
   renderRosterWeek(host.querySelector("#ro-adm-wk"),S.roGf);}
+
+/* Rosters tab (Construction Managers, admins, billing): every GF's roster for a day, plus each GF's week */
+function renderRosters(){
+  const day=S.roDay||(S.roDay=todayStr());const list=rosters().filter(r=>r.date===day).sort((a,b)=>a.gfName.localeCompare(b.gfName));
+  const tot=list.reduce((a,r)=>{const c=roCounts(r);a.crews+=c.crews;a.people+=c.people;a.equip+=c.equip;a.hrs+=c.hrs;return a;},{crews:0,people:0,equip:0,hrs:0});
+  main.innerHTML='<section class="jobhead"><div><h1>Daily rosters</h1><div class="meta"><span>Crews, workers, equipment and hours entered by each General Foreman</span></div></div></section>'+
+    '<div class="filters"><button class="btn sm" type="button" data-d="-1" aria-label="Previous day">‹</button><input type="date" id="rs-day" value="'+esc(day)+'" aria-label="Day"><button class="btn sm" type="button" data-d="1" aria-label="Next day">›</button>'+(day!==todayStr()?'<button class="btn sm" type="button" data-d="0">Today</button>':"")+'<span class="count"><b>'+esc(roDay(day))+"</b> · "+list.length+" roster"+(list.length===1?"":"s")+" · "+tot.crews+" crews · "+tot.people+" people · "+tot.equip+" equipment · "+fmtN(tot.hrs)+" labor hrs</span></div>"+
+    (list.length?list.map(r=>'<section class="ro-crew"><div class="ro-ch"><h2 class="sec" style="margin:0">'+esc(r.gfName)+'</h2><button class="btn sm" type="button" data-open="'+esc(r.id)+'">'+(canRoEdit(r.gfKey)?"Open / edit":"Open")+"</button></div>"+
+      (r.crews||[]).map((c,ci)=>{const j=c.jobId?jobById(c.jobId):null;
+        return'<h3 class="pv-h3">Crew '+(ci+1)+(c.foreman?" — Foreman "+esc(c.foreman):"")+(j?' · <span class="chip c-sch">'+esc(j.name)+" (T&amp;E)</span>":"")+"</h3>"+(c.notes?'<p class="sub" style="margin:0 0 6px">'+esc(c.notes)+"</p>":"")+
+          '<div class="ro-two"><div class="tablebox"><table class="static"><thead><tr><th>Worker</th><th>Classification</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th></tr></thead><tbody>'+(c.workers||[]).map(w=>"<tr><td><b>"+esc(w.name)+"</b></td><td>"+esc(w.role)+'</td><td class="mono num">'+fmtN(w.st)+'</td><td class="mono num">'+fmtN(w.ot)+'</td><td class="mono num">'+fmtN(w.dt)+"</td></tr>").join("")+"</tbody></table></div>"+
+          '<div class="tablebox"><table class="static"><thead><tr><th>Equipment</th><th>Unit #</th><th class="num">Hours</th></tr></thead><tbody>'+((c.equip||[]).map(e=>"<tr><td>"+esc(e.desc)+'</td><td class="mono">'+esc(e.unitNo||"")+'</td><td class="mono num">'+fmtN(e.h)+"</td></tr>").join("")||'<tr><td colspan="3" class="sub">No equipment</td></tr>')+"</tbody></table></div></div>";}).join("")+"</section>").join("")
+      :'<div class="empty"><b>No rosters for '+esc(roDay(day))+"</b>General Foremen create them from their home screen.</div>")+
+    '<h2 class="sec">Week by General Foreman</h2><div id="rs-wk"></div>';
+  main.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{const n=+b.dataset.d;S.roDay=n?addDays(day,n):todayStr();renderRosters();});
+  document.getElementById("rs-day").onchange=e=>{if(e.target.value){S.roDay=e.target.value;renderRosters();}};
+  main.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{location.hash="roster-"+b.dataset.open;});
+  roAdminSection(document.getElementById("rs-wk"));}

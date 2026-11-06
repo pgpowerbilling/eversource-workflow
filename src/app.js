@@ -336,15 +336,15 @@ function route(){
   else if(h.indexOf("jobedit-")===0){S.view="jobedit";S.docId=h.slice(8);}
   else if(h.indexOf("roster-")===0){S.view="roster";S.docId=h.slice(7);}
   else if(h.indexOf("job-")===0){const id=h.slice(4);if(S.view!=="job"||S.docId!==id){S.jobTab=null;S.pf={q:"",st:""};}S.view="job";S.docId=id;}
-  else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets"].includes(h))S.view=h;else S.view="overview";
+  else if(["invoices","addjob","addjob-new","rates","sheets","ubl","timesheets","rosters"].includes(h))S.view=h;else S.view="overview";
   if(role()==="crew"&&!["sheet","job","roster"].includes(S.view))S.view="sheets";
-  if(S.view==="roster"&&!["crew","admin","approver","viewer"].includes(role()))S.view="overview";
+  if(["roster","rosters"].includes(S.view)&&!canRosters())S.view="overview";
   if(S.view!=="roster")S.rEdit=null;  /* General Foremen: their own sheets + job pages (no pricing) */
   if(S.view==="rates"&&!canRates())S.view="overview";
   if(["invoices","invoice"].includes(S.view)&&!can.seeInvoices())S.view="overview";
   if(S.view==="ubl"&&!canUbl())S.view="overview";
   if(S.view==="timesheets"&&!canPayroll())S.view="overview";
-  const nav=role()==="crew"?"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob",roster:"timesheets"}[S.view]||S.view;
+  const nav=role()==="crew"?"sheets":S.view==="sheet"&&isTe(S.docs.get(S.docId))?"timesheets":{sheet:"overview",sheets:"overview",job:"overview",invoice:"invoices","addjob-new":"addjob",jobedit:"addjob",roster:"rosters"}[S.view]||S.view;
   if(S.view!=="jobedit")S.jobEdit=null;
   document.querySelectorAll("[data-nav]").forEach(a=>{if(a.dataset.nav===nav)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});
   refresh();window.scrollTo(0,0);
@@ -357,10 +357,10 @@ function refresh(){
   set("ct-jobs",jobs().filter(j=>!j.archived).length||"");
   set("ct-ready",sheets().filter(isReady).length||"");set("ct-ts",sheets().filter(s=>isTe(s)&&s.status===ST.SUB).length||"");
   document.getElementById("btn-new").hidden=!can.newSheet();
-  document.querySelectorAll("[data-nav=rates]").forEach(a=>a.hidden=!canRates());document.querySelectorAll("[data-nav=invoices]").forEach(a=>a.hidden=!can.seeInvoices());document.querySelectorAll("[data-nav=ubl]").forEach(a=>a.hidden=!canUbl());document.querySelectorAll("[data-nav=timesheets]").forEach(a=>a.hidden=!canPayroll());
+  document.querySelectorAll("[data-nav=rates]").forEach(a=>a.hidden=!canRates());document.querySelectorAll("[data-nav=invoices]").forEach(a=>a.hidden=!can.seeInvoices());document.querySelectorAll("[data-nav=ubl]").forEach(a=>a.hidden=!canUbl());document.querySelectorAll("[data-nav=timesheets]").forEach(a=>a.hidden=!canPayroll());document.querySelectorAll("[data-nav=rosters]").forEach(a=>a.hidden=!canRosters()||role()==="crew");
   const v=S.view;
   if(v==="sheet")renderSheet();else if(v==="invoice")renderInvoice();else if(v==="invoices")renderInvoices();
-  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else if(v==="timesheets")renderTimesheets();else if(v==="roster")renderRoster();else renderOverview();
+  else if(v==="job")renderJob();else if(v==="addjob")renderAddJob();else if(v==="addjob-new")renderAddJobForm();else if(v==="jobedit")renderJobEdit();else if(v==="rates")renderRates();else if(v==="ubl")renderUbl();else if(v==="sheets")renderSheets();else if(v==="timesheets")renderTimesheets();else if(v==="roster")renderRoster();else if(v==="rosters")renderRosters();else renderOverview();
 }
 
 /* ---------- pricing (rates from the template's Unit Rate Master; no rounding until display / final total) ---------- */
@@ -595,6 +595,7 @@ function diffLines(a,b){const A=new Map((a||[]).map(l=>[l.key,l])),B=new Map((b|
    ready to bill, and on an invoice that has not been marked Sent. Marking an invoice Sent removes its
    sheets from the UBL; voiding it puts them back. Amounts = qty x area rate, unrounded until the total. */
 const canUbl=()=>isBill()&&role()!=="gf";
+const canRosters=()=>["crew","admin","approver","gf"].includes(role());
 const canPayroll=()=>!["gf","crew"].includes(role());  /* Construction Managers and GFs: no Payroll tab */
 const UBL_STAGES=[["cm","Awaiting CM signature"],["ret","Returned to field"],["ready","Ready to bill"],["draft","Invoiced, not sent"]];
 function ublStage(s){
