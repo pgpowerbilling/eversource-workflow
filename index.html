@@ -217,6 +217,7 @@ tfoot td{background:var(--info-bg);border-top:2px solid var(--navy)}
 .ro-t input[type=number]{width:64px;padding:4px 6px;border:1px solid var(--field);border-radius:4px;font:inherit;text-align:right}
 .ro-t select{max-width:220px}
 .ro-save{justify-content:flex-end;gap:8px;margin:6px 0 30px;position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--line)}
+.cp-in{padding:3px 6px;border:1px solid var(--field);border-radius:4px;font:inherit;font-size:12px;max-width:150px}
 .sd-cell{display:flex;flex-direction:column;gap:4px;min-width:120px}.sd-chk{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin:0}.sd-cell input[type=date]{padding:3px 6px;border:1px solid var(--field);border-radius:4px;font:inherit;font-size:12px;max-width:150px}
 #print{display:none}
 .tbtn{text-align:left;font:inherit;cursor:pointer}
@@ -1377,13 +1378,21 @@ function drawUbl(){
 /* ---------- location shutdown (on hold for a shutdown / scheduled day) ---------- */
 const sdOn=p=>!!(p&&p.shutdown&&p.shutdown.on);
 const canShutdown=j=>W()&&["admin","gf","crew"].includes(role())&&!(j&&j.archived);
-function locDone(j,p,mine){if(isTeJob(j))return!!p.teDone;const sh=mine.filter(s=>s.poleId===p.id);return!!(sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV));}
+function locDone(j,p,mine){if(isTeJob(j))return!!p.teDone;if(p.completed)return true;const sh=mine.filter(s=>s.poleId===p.id);return!!(sh.length&&sh.every(s=>isReady(s)||s.status===ST.INV));}
 function progPct(st){const a=st.locs?Math.round(st.doneLocs/st.locs*100):0;const den=st.locs-st.shut;const b=den>0?Math.round(st.doneLocs/den*100):(st.locs?100:0);return{a,b};}
 function progSub(st){const p=progPct(st);return p.a+"% with shutdowns"+(st.shut?" · "+p.b+"% without ("+st.shut+" shutdown)":"");}
 function shutTile(st){return tile("Shutdown",st.shut,st.shut?(st.shutNext?"Next scheduled "+fmtD(st.shutNext):"No dates set")+(st.shutNoDate&&st.shutNext?" · "+st.shutNoDate+" no date":""):"No locations on shutdown",false);}
 function shutCell(j,p){const on=sdOn(p);const ok=canShutdown(j);const d=on?p.shutdown.date||"":"";
   return'<div class="sd-cell"><label class="sd-chk"><input type="checkbox" data-sd="'+esc(p.id)+'"'+(on?" checked":"")+(ok?"":" disabled")+' aria-label="Shutdown — '+esc([p.esPole,p.street].filter(Boolean).join(" "))+'"><span>'+(on?'<span class="chip c-bad">Shutdown</span>':"Shutdown")+"</span></label>"+
     (on?(ok?'<input type="date" data-sdd="'+esc(p.id)+'" value="'+esc(d)+'" aria-label="Date it will be done" title="Date it will be done">':'<span class="sub">'+(d?esc(fmtD(d)):"No date")+"</span>"):"")+"</div>";}
+/* ---------- completed date per location (unit jobs) ---------- */
+function compCell(j,p){const ok=canShutdown(j);const v=p.completed||"";
+  return ok?'<input type="date" class="cp-in" data-cp="'+esc(p.id)+'" value="'+esc(v)+'" max="'+todayStr()+'" aria-label="Completed date" title="'+(v&&p.completedBy?"Set by "+esc(p.completedBy):"Date the location was completed")+'">':(v?esc(fmtD(v)):'<span class="sub">—</span>');}
+function bindComp(tb,j){tb.querySelectorAll("[data-cp]").forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.onkeydown=e=>e.stopPropagation();
+  inp.onchange=async()=>{const v=inp.value;if(v&&v>todayStr()){toast("The completed date can't be in the future.");inp.value="";return;}if(!canSave()){refresh();return;}inp.disabled=true;
+    try{await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===j.id);const pp=jj&&(jj.poles||[]).find(x=>x.id===inp.dataset.cp);if(!pp)throw new Error("This location was removed.");
+        if(v){pp.completed=v;pp.completedBy=S.me.name;pp.completedAt=new Date().toISOString();}else{delete pp.completed;delete pp.completedBy;delete pp.completedAt;}},v?"Workflow: location completed":"Workflow: completed date cleared");
+      refresh();toast(v?"Completed "+fmtD(v):"Completed date cleared");}catch(x){toast(errText(x),8000);refresh();}};});}
 function bindShut(tb,j){
   tb.querySelectorAll(".sd-cell").forEach(c=>{c.onclick=e=>e.stopPropagation();c.onkeydown=e=>e.stopPropagation();});
   tb.querySelectorAll("[data-sd]").forEach(cb=>cb.onchange=()=>saveShut(j.id,cb.dataset.sd,cb.checked?{on:true}:null,cb));
@@ -1485,8 +1494,8 @@ function renderJobPage(){
   document.getElementById("t-locs").onclick=()=>{S.jobTab="locs";renderJob();};document.getElementById("t-sheets").onclick=()=>{S.jobTab="sheets";renderJob();};const tg=document.getElementById("t-gf");if(tg)tg.onclick=()=>{S.jobTab="gf";renderJob();};
   const on=(i,fn)=>{const b=document.getElementById(i);if(b)b.onclick=fn;};
   on("jb-sheet",()=>openSheetForm(null,j.id));on("jb-pkg",()=>openAddLocations(j.id,true));main.querySelectorAll("[data-pk]").forEach(b=>b.onclick=()=>openPackage(j.packages[+b.dataset.pk],b));on("jb-print",()=>openPrintPicker(j.id));on("jb-upl",()=>openSheetUpload(j.id));on("jb-add",()=>openAddLocations(j.id));on("jb-edit",()=>{location.hash="jobedit-"+j.id;});
-  on("jb-csv",()=>{const sx=sheets();const head=["#","Ticket ID","Town","Street","ES Pole #","VZ Pole #","PDF Page","WO / Job #","Pricing Area","Date Set","Status","Shutdown","Shutdown date","Sheets","Notes"];
-    const lines=[head].concat((j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);return[p.n,p.ticket,p.town,p.street,p.esPole,p.vzPole,p.pdfPage,p.woJob||j.wo,poleArea(j,p),p.dateSet,poleStatus(sh)[0],sdOn(p)?"Yes":"",sdOn(p)?p.shutdown.date||"":"",sh.map(s=>s.no).join(" "),p.notes];}));
+  on("jb-csv",()=>{const sx=sheets();const head=["#","Ticket ID","Town","Street","ES Pole #","VZ Pole #","PDF Page","WO / Job #","Pricing Area","Date Set","Status","Completed","Shutdown","Shutdown date","Sheets","Notes"];
+    const lines=[head].concat((j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);return[p.n,p.ticket,p.town,p.street,p.esPole,p.vzPole,p.pdfPage,p.woJob||j.wo,poleArea(j,p),p.dateSet,poleStatus(sh)[0],p.completed||"",sdOn(p)?"Yes":"",sdOn(p)?p.shutdown.date||"":"",sh.map(s=>s.no).join(" "),p.notes];}));
     download(new Blob(["﻿"+lines.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Locations - "+j.name+".csv");});
   const box=document.getElementById("jbody");
   if(tab==="gf"){if(!canGfSign())box.innerHTML='<p class="sub">Only a Construction Manager or admin can sign.</p>';else gfTable(box,gfList,false);return;}
@@ -1497,17 +1506,17 @@ function renderJobPage(){
     tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceSheet(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+'</td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+(s.lines||[]).length+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="7"><div class="empty"><b>No unit sheets yet</b>Crews submit one sheet per location.</div></td></tr>';
     bindRows(tb,id=>location.hash="sheet-"+id);return;}
   const q=S.pf.q||"",stf=S.pf.st||"";
-  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
-    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
+  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Completed","Not completed","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Completed</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
   const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
   function fill(){const tb=document.getElementById("pl-body");const qq=(S.pf.q||"").trim().toLowerCase();const sx=sheets();
     const rows=(j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);const stt=poleStatus(sh);
       const appr=sh.filter(s=>isReady(s)||s.status===ST.INV).map(priceSheet);const amt=appr.some(x=>x.total==null)?null:appr.reduce((a,x)=>a+x.total,0);return{p,sh,stt,amt,napp:appr.length};})
-      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):r.stt[0]===S.pf.st)));
+      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):S.pf.st==="Completed"?!!r.p.completed:S.pf.st==="Not completed"?!r.p.completed:r.stt[0]===S.pf.st)));
     document.getElementById("pl-count").textContent=rows.length+" of "+(j.poles||[]).length+" locations"+(sa.shut?" · "+sa.shut+" shutdown":"");
     tb.innerHTML=rows.map(r=>{const p=r.p;const ar=poleArea(j,p);return'<tr tabindex="0" data-id="'+esc(p.id)+'"><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.vzPole)+'</td><td class="mono">'+esc(p.pdfPage)+"</td><td>"+(ar?esc(ar)+(p.area?"":' <span class="sub">(job default)</span>'):'<span class="late">Not set</span>')+'</td><td class="mono">'+r.sh.length+"</td>"+
-      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="14"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
-    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);
+      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+compCell(j,p)+"</td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="15"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
+    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);bindComp(tb,j);
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
