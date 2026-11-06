@@ -31,6 +31,21 @@ tfoot td{background:var(--info-bg);border-top:2px solid var(--navy)}
 .who .role{white-space:nowrap}
 .nobill .bill-only{display:none!important}
 .crewonly .nocrew{display:none!important}
+.ro-wk{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px 14px;margin:0 0 16px}
+.ro-wk-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.ro-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ro-days{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.ro-day{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-height:92px}
+.ro-day.has{border-style:solid;background:var(--bg)}.ro-day.today{border-color:var(--navy,#1f3a6e);border-width:2px}
+.ro-dn{font-weight:700;font-size:13px}
+.ro-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.ro-te{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+.ro-crew{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px 14px;margin:0 0 14px}
+.ro-ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ro-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 12px}.ro-fields .wide{grid-column:1/-1}
+.ro-t input[type=number]{width:64px;padding:4px 6px;border:1px solid var(--field);border-radius:4px;font:inherit;text-align:right}
+.ro-t select{max-width:220px}
+.ro-save{justify-content:flex-end;gap:8px;margin:6px 0 30px;position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--line)}
 .sd-cell{display:flex;flex-direction:column;gap:4px;min-width:120px}.sd-chk{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin:0}.sd-cell input[type=date]{padding:3px 6px;border:1px solid var(--field);border-radius:4px;font:inherit;font-size:12px;max-width:150px}
 #print{display:none}
 .tbtn{text-align:left;font:inherit;cursor:pointer}

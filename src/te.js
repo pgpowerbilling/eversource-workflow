@@ -543,11 +543,11 @@ function payRows(d,cls){const sc=payTpl().scales;
     const stp=w==null?null:w*st,otp=w==null?null:w*1.5*ot,dtp=w==null?null:w*2*dt,tot=w==null?null:stp+otp+dtp;
     return{name:L.name,cls:c,sheetCls:L.cls,wage:w,days,st,ot,dt,pd,stp,otp,dtp,tot,perDiem:pd*150,meals:0,dues:tot==null?null:tot*0.03};});}
 function canPaySheet(d){return isTe(d)&&d.weekly&&(role()==="crew"?d.createdByKey===S.myKey:role()!=="viewer");}
-function openPaySheet(id){
-  const d=S.docs.get(id);if(!d||!canPaySheet(d))return;const tp=payTpl();
+function openPaySheet(id,alt){
+  const d=alt?alt.d:S.docs.get(id);if(!d||(!alt&&!canPaySheet(d)))return;const tp=payTpl();
   if(!tp){toast(canRates()?"Load the pay sheet template first (Rates tab).":"The pay sheet template hasn't been loaded yet. Ask billing.",7000);return;}
   if(d.labor.length>tp.layout.lastRow-tp.layout.firstRow+1){toast("This week has "+d.labor.length+" people but the pay sheet template has room for "+(tp.layout.lastRow-tp.layout.firstRow+1)+".",8000);return;}
-  const prev=d.paySheet;const cls=(d.labor||[]).map((L,i)=>(prev&&prev.rows&&prev.rows[i]&&prev.rows[i].name===L.name&&prev.rows[i].cls)||payClassFor(L));
+  const prev=alt?alt.prev:d.paySheet;const cls=(d.labor||[]).map((L,i)=>(prev&&prev.rows&&prev.rows[i]&&prev.rows[i].name===L.name&&prev.rows[i].cls)||payClassFor(L));
   const m=modal("Pay sheet — "+teWeekText(d),'<div id="ps-body"></div>',
     (prev?'<button class="btn" type="button" id="ps-dl">Download published pay sheet</button>':"")+'<button class="btn" type="button" data-x>Close</button><button class="btn primary" type="button" id="ps-go">'+(prev?"Republish pay sheet":"Publish pay sheet")+"</button>","wide");
   const opts=tp.scales.map(x=>'<option value="'+esc(x.cls)+'">'+esc(x.cls+" — "+x.pos+" ($"+x.wage.toFixed(2)+")")+"</option>").join("");
@@ -572,12 +572,12 @@ function openPaySheet(id){
     const title=tp.title?tp.title.replace(/\d{1,2}\.\d{1,2}\.\d{2,4}/,mdY(ws)):"";if(title)ed["A1"]=title;
     const tabName=mdY(ws)+" TO "+mdY(addDays(ws,6));
     const out=await TMPL.fillCells(unb64(box.b64),tp.tab,ed,tabName);
-    const fname=(jobById(d.jobId)||{name:"Job"}).name+" Paysheet "+mdY(ws).replace(/\./g,"-")+".xlsx";
+    const fname=alt?alt.fname:(jobById(d.jobId)||{name:"Job"}).name+" Paysheet "+mdY(ws).replace(/\./g,"-")+".xlsx";
     const fileObj=new File([out],fname,{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const meta=await storePackage(fileObj);const T=k=>rows.reduce((a,r)=>a+(r[k]||0),0);
     const rec={file:meta,at:new Date().toISOString(),by:S.me.name,rows:rows.map(r=>({name:r.name,cls:r.cls,wage:r.wage,st:r.st,ot:r.ot,dt:r.dt,pd:r.pd,tot:r.tot})),totals:{pay:T("tot"),perDiem:T("perDiem"),dues:T("dues"),hours:T("st")+T("ot")+T("dt")}};
     await commitIndex(ix=>{ix.payAlias=ix.payAlias||{};const by=new Map();rows.forEach(r=>{const k=teNorm(r.sheetCls);if(!k)return;(by.get(k)||by.set(k,new Set()).get(k)).add(r.cls);});by.forEach((v,k)=>{if(v.size===1)ix.payAlias[k]=[...v][0];});},"Workflow: pay class matches");
-    const ok=await commitDoc(id,x=>{x.paySheet=rec;},(prev?"Pay sheet republished: ":"Pay sheet published: ")+fname+" · pay "+money(rec.totals.pay)+" + per diem "+money(rec.totals.perDiem));
+    const ok=alt?await alt.save(rec):await commitDoc(id,x=>{x.paySheet=rec;},(prev?"Pay sheet republished: ":"Pay sheet published: ")+fname+" · pay "+money(rec.totals.pay)+" + per diem "+money(rec.totals.perDiem));
     if(ok){download(new Blob([out],{type:fileObj.type}),fname);closeOverlay();toast("Pay sheet published and downloaded");}});}
 /* Rates tab: pay sheet template */
 function payTplSection(host){const tp=payTpl();const ed=canRates()&&S.canWrite;
@@ -639,6 +639,7 @@ function renderTimesheets(){
   const by=st=>all.filter(s=>s.status===st).length;
   main.innerHTML='<section class="jobhead"><div><h1>Timesheets</h1><div class="meta"><span>Every submitted T&amp;E timesheet, all jobs</span></div></div></section>'+
     '<section class="tiles">'+tile("Timesheets",all.length,all.length?"Latest "+teWeekText(all.slice().sort((a,b)=>String(b.workDate).localeCompare(String(a.workDate)))[0]):"None yet",false)+tile("Awaiting CM signature",by(ST.SUB),"To review",by(ST.SUB)>0)+tile("Returned to field",by(ST.RET),"Need a corrected upload",by(ST.RET)>0)+tile("Ready to bill",all.filter(isReady).length,"Signed by the CM",false)+tile("Invoiced",by(ST.INV),"On invoices",false)+tile("Pay sheets",all.filter(s=>s.paySheet).length+" / "+all.length,"Published",false)+"</section>"+
+    '<div id="ro-admin"></div>'+
     '<div class="filters"><input type="search" id="ts-q" placeholder="Search timesheet #, foreman, WO, person…" aria-label="Search timesheets" value="'+esc(f.q)+'">'+
     '<select id="ts-job" aria-label="Job"><option value="">All jobs</option>'+jl.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===f.job?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select>"+
     '<select id="ts-st" aria-label="Status"><option value="">All statuses</option>'+[ST.SUB,ST.RET,"ready",ST.INV].map(x=>'<option value="'+x+'"'+(x===f.st?" selected":"")+">"+esc(x==="ready"?"Ready to bill":ST_LABEL[x]||x)+"</option>").join("")+"</select>"+
@@ -653,6 +654,7 @@ function renderTimesheets(){
       (pr?'<td class="mono num">'+(pr.total==null?'<span class="sub" title="'+esc(pr.errs.join("; "))+'">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td><td>"+(s.paySheet?'<span class="chip c-done">Published</span>':'<span class="sub">—</span>')+'</td><td class="mono">'+esc(s.invoiceNo||"")+'</td><td class="sub">'+esc((s.createdBy||"")+" · "+fmtD((s.submittedAt||s.createdAt||"").slice(0,10)))+"</td></tr>";}).join("")||
       '<tr><td colspan="10"><div class="empty"><b>'+(all.length?"No timesheets match the filters":"No timesheets yet")+"</b>"+(all.length?"":"Weekly timesheets appear here once they're uploaded on a T&amp;E job.")+"</div></td></tr>";
     bindRows(tb,id=>location.hash="sheet-"+id);}
+  roAdminSection(document.getElementById("ro-admin"));
   const on=(id,ev,fn)=>{document.getElementById(id)[ev]=fn;};
   on("ts-q","oninput",e=>{f.q=e.target.value;fill();});on("ts-job","onchange",e=>{f.job=e.target.value;fill();});on("ts-st","onchange",e=>{f.st=e.target.value;fill();});on("ts-pay","onchange",e=>{f.pay=e.target.value;fill();});
   on("ts-csv","onclick",()=>{const L=[["Timesheet #","Job","Week start","Week end","Foreman","General Foreman","WO","FWO","People","Labor hrs","Equipment"].concat(priced?["Amount (USD)"]:[]).concat(["Status","Pay sheet","Invoice #","Submitted by","Submitted"])];
