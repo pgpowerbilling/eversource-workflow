@@ -36,7 +36,7 @@ const isoDay=iso=>{if(!iso)return"";const d=new Date(iso);return isNaN(d)?"":fmt
 function fmtT(s){if(!s)return"";const d=new Date(s);return isNaN(d)?s:d.toLocaleString("en-US",{month:"2-digit",day:"2-digit",year:"numeric",hour:"numeric",minute:"2-digit"});}
 function fmtN(v){if(v==null||v==="")return"";const n=Number(v);return isFinite(n)?n.toLocaleString("en-US",{maximumFractionDigits:4}):"";}
 const cents=x=>Math.round((Number(x)+Number.EPSILON)*100)/100;
-const money=v=>v==null||!isFinite(v)?"—":Number(v).toLocaleString("en-US",{style:"currency",currency:"USD"});
+const money=v=>S.hidePrices?"$ •••":v==null||!isFinite(v)?"—":Number(v).toLocaleString("en-US",{style:"currency",currency:"USD"});
 function newId(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 let toastT;function toast(msg,ms){let t=document.getElementById("toast");if(!t){t=document.createElement("div");t.id="toast";t.className="toast";t.setAttribute("role","status");document.body.appendChild(t);}t.textContent=msg;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,ms||3500);}
 const jobs=()=>(S.index&&S.index.jobs)||[];
@@ -90,11 +90,11 @@ const can={
   hold:d=>W()&&(isBill()||role()==="gf")&&[ST.SUB,ST.GF,ST.OK].includes(d.status),
   invoice:()=>W()&&isBill(),
   setup:()=>W()&&isBill(),
-  seePrice:()=>role()!=="crew",  /* Construction Managers (gf) see unit pricing; General Foremen (crew) see units and quantities only */
+  seePrice:()=>role()!=="crew"&&!S.hidePrices,  /* Construction Managers (gf) see unit pricing; General Foremen (crew) see units and quantities only */
   seeInvoices:()=>!["crew","gf"].includes(role())  /* invoices stay with admins / billing */
 };
 function applyRO(){S.canWrite=!!S.me&&role()!=="viewer";document.body.classList.toggle("ro",!S.canWrite);document.body.classList.toggle("notadmin",!isAdmin());
-  document.body.classList.toggle("nobill",!isBill());document.body.classList.toggle("crewonly",role()==="crew");renderBanner();}
+  document.body.classList.toggle("nobill",!isBill());document.body.classList.toggle("crewonly",role()==="crew");{const hb=document.getElementById("btn-price");if(hb)hb.hidden=role()==="crew";}renderBanner();}
 function renderBanner(){const b=document.getElementById("bannerWrap");if(!b)return;
   if(!S.index||hasToken()){b.innerHTML="";return;}
   b.innerHTML='<div class="banner">'+(isAdmin()?'Saving is not connected yet. Open <b>Settings</b> and paste the GitHub key (the same one the AP Invoice Tracker uses) so changes are saved for everyone.':'View only for now: saving still needs to be connected by an admin.')+"</div>";}
@@ -227,6 +227,9 @@ async function initLogin(){
   document.getElementById("btn-out").onclick=()=>{location.hash="";location.reload();};
   document.getElementById("btn-settings").onclick=openSettings;
   document.getElementById("btn-logins").onclick=openLogins;
+  try{S.hidePrices=localStorage.getItem("pg-wf-hide-prices")==="1";}catch(e){S.hidePrices=false;}
+  const hp=document.getElementById("btn-price");const hpSync=()=>{hp.hidden=role()==="crew";hp.textContent=S.hidePrices?"Show prices":"Hide prices";hp.setAttribute("aria-pressed",S.hidePrices?"true":"false");hp.classList.toggle("primary",!!S.hidePrices);};
+  hpSync();hp.onclick=()=>{S.hidePrices=!S.hidePrices;try{localStorage.setItem("pg-wf-hide-prices",S.hidePrices?"1":"0");}catch(e){}hpSync();refresh();toast(S.hidePrices?"Prices hidden on this screen":"Prices shown",2500);};
   document.getElementById("btn-pw").onclick=openPassword;
   document.getElementById("btn-new").onclick=()=>openSheetForm(null);
 }
@@ -416,7 +419,8 @@ function renderSheets(){
 }
 function bindRows(tb,fn){tb.querySelectorAll("tr[data-id]").forEach(tr=>{tr.onclick=()=>fn(tr.dataset.id);tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fn(tr.dataset.id);}};});}
 function dl(k,v,wide){return'<div class="dl'+(wide?" wide":"")+'"><span class="k">'+esc(k)+'</span><span class="v">'+(v===""||v==null?'<span class="sub">—</span>':v)+"</span></div>";}
-function histHtml(d){return'<div class="hist">'+((d.history||[]).slice().reverse().map(h=>'<div class="row"><span class="t">'+esc(fmtT(h.t))+"</span><b>"+esc(h.by)+"</b><span>"+esc(h.text)+"</span></div>").join("")||'<div class="row"><span class="sub">No history.</span></div>')+"</div>";}
+const maskPrice=s=>S.hidePrices?String(s||"").replace(/\$\s?[\d,]+(\.\d+)?/g,"$ •••"):s;
+function histHtml(d){return'<div class="hist">'+((d.history||[]).slice().reverse().map(h=>'<div class="row"><span class="t">'+esc(fmtT(h.t))+"</span><b>"+esc(h.by)+"</b><span>"+esc(maskPrice(h.text))+"</span></div>").join("")||'<div class="row"><span class="sub">No history.</span></div>')+"</div>";}
 function sheetLinesHtml(d){
   const priced=can.seePrice();const pr=priceSheet(d);
   const rows=pr.lines.map(l=>'<tr><td>'+esc(l.workType)+'</td><td class="wrapc"><b>'+esc(l.item)+"</b></td>"+'<td class="mono num">'+fmtN(l.qty)+"</td>"+
