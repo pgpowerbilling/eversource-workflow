@@ -300,3 +300,58 @@ function renderShutdowns(){const f=S.sdf||(S.sdf={q:"",job:"",when:""});
   fill();document.getElementById("sd-q").oninput=e=>{f.q=e.target.value;fill();};document.getElementById("sd-job").onchange=e=>{f.job=e.target.value;fill();};document.getElementById("sd-when").onchange=e=>{f.when=e.target.value;fill();};
   document.getElementById("sd-csv").onclick=()=>{const L=[["Scheduled date","Job","#","Pole #","Street","Town","Ticket","WO","Set by","Set at"]].concat(rows().map(({j,p})=>[p.shutdown.date||"",j.name,p.n,p.esPole,p.street,p.town,p.ticket||"",p.woJob||"",p.shutdown.by||"",(p.shutdown.at||"").slice(0,10)]));
     download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Shutdowns.csv");};}
+
+/* ---------- Excel unit sheets: one row per location (template download + upload reader) ---------- */
+const UX_FIELDS=[["ticket","Ticket ID"],["locno","Loc #"],["pole","Pole #"],["street","Location"],["date","Work date (MM/DD/YYYY)"],["crew","Crew / lead"],["wo","Work order #"],["fwo","Field work order #"],["awc","AWC"],["poleset","Pole set (Y/N)"],["notes","Notes / other work"]];
+const uxNorm=s=>String(s==null?"":s).toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9.]+/g," ").replace(/\s+/g," ").trim();
+const uxUnits=()=>CREW_SECTIONS.flatMap(([sec,items])=>items.map(([k,l])=>({key:k,sec,label:l,head:sec+" — "+l})));
+function uxColName(i){let s="";i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s;}
+const uxEsc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+/* minimal .xlsx writer: rows = [[{v,s}|value]], styles: 0 normal, 1 header, 2 input, 3 key row, 4 title */
+async function uxWriteXlsx(name,rows,o){const Z=window.JSZip;if(!Z)throw new Error("The spreadsheet tool didn't load. Refresh and try again.");const z=new Z();
+  z.file("[Content_Types].xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
+  z.file("_rels/.rels",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  z.file("xl/workbook.xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+uxEsc(name)+'" sheetId="1" r:id="rId1"/></sheets></workbook>');
+  z.file("xl/_rels/workbook.xml.rels",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  z.file("xl/styles.xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><sz val="8"/><color rgb="FF999999"/><name val="Arial"/></font><font><b/><sz val="13"/><color rgb="FF1F3864"/><name val="Arial"/></font></fonts>'+
+    '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F3864"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF9DB"/></patternFill></fill></fills>'+
+    '<borders count="2"><border/><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs>'+
+    '<cellXfs count="5"><xf fontId="0" fillId="0" borderId="1" applyBorder="1"/><xf fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center" horizontal="center"/></xf><xf fontId="0" fillId="3" borderId="1" applyFill="1" applyBorder="1"/><xf fontId="2" fillId="0" borderId="0" applyFont="1"/><xf fontId="3" fillId="0" borderId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
+  const xml=rows.map((r,ri)=>'<row r="'+(ri+1)+'"'+((o.hidden||[]).includes(ri+1)?' hidden="1"':"")+((o.heights||{})[ri+1]?' ht="'+o.heights[ri+1]+'" customHeight="1"':"")+">"+r.map((c,ci)=>{if(c==null)return"";const cell=typeof c==="object"?c:{v:c};const ref=uxColName(ci)+(ri+1);const s=cell.s!=null?' s="'+cell.s+'"':"";
+    if(cell.v===""||cell.v==null)return'<c r="'+ref+'"'+s+"/>";return typeof cell.v==="number"?'<c r="'+ref+'"'+s+"><v>"+cell.v+"</v></c>":'<c r="'+ref+'"'+s+' t="inlineStr"><is><t xml:space="preserve">'+uxEsc(cell.v)+"</t></is></c>";}).join("")+"</row>").join("");
+  const fz=o.freeze?'<sheetViews><sheetView workbookViewId="0"><pane xSplit="'+o.freeze.c+'" ySplit="'+o.freeze.r+'" topLeftCell="'+uxColName(o.freeze.c)+(o.freeze.r+1)+'" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>':"";
+  const cols=o.widths?"<cols>"+o.widths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join("")+"</cols>":"";
+  z.file("xl/worksheets/sheet1.xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+fz+cols+"<sheetData>"+xml+"</sheetData></worksheet>");
+  return z.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});}
+async function downloadUnitXlsx(j,btn){try{if(btn)btn.disabled=true;const U=uxUnits();
+  const locs=(j.poles||[]).slice().sort((a,b)=>(a.n||0)-(b.n||0));
+  const rows=[[{v:"Unit sheets — "+j.name+" (one row per location). Fill in the yellow cells: work date, crew, quantities. Leave a row's quantities blank to skip it. Upload on the job page with Upload Unit Sheets.",s:4}],
+    UX_FIELDS.map(f=>({v:f[0],s:3})).concat(U.map(u=>({v:u.key,s:3}))),
+    UX_FIELDS.map(f=>({v:f[1],s:1})).concat(U.map(u=>({v:u.head,s:1})))];
+  locs.forEach(p=>rows.push([p.ticket||"",p.n||"",p.esPole||"",[p.street,p.town].filter(Boolean).join(", "),{v:"",s:2},{v:"",s:2},p.woJob||j.wo||"",{v:"",s:2},{v:"",s:2},{v:"",s:2},{v:"",s:2}].map(v=>typeof v==="object"?v:{v,s:0}).concat(U.map(()=>({v:"",s:2})))));
+  const blob=await uxWriteXlsx("Unit Sheets",rows,{hidden:[2],freeze:{r:3,c:4},heights:{3:54},widths:[10,6,12,28,13,16,12,12,10,9,28].concat(U.map(()=>13))});
+  download(blob,j.name.replace(/[\\/:*?"<>|]+/g," ")+" Unit Sheets.xlsx");toast("Downloaded the Excel unit sheet: "+locs.length+" locations",4000);}
+  catch(x){toast(errText(x),8000);}finally{if(btn)btn.disabled=false;}}
+/* read a one-row-per-location workbook into the same entries the PDF reader gives */
+async function readUnitXlsx(file){const T=await TMPL.tables(await file.arrayBuffer());const name=T.names.find(n=>/unit/i.test(n))||T.names[0];const g=await T.get(name);const U=uxUnits();
+  const byLabel=new Map();U.forEach(u=>{[u.key,u.head,u.sec+" "+u.label,u.label,(unitInfo(u.key).workType||"")+" "+unitInfo(u.key).item,unitInfo(u.key).item].forEach(x=>{const k=uxNorm(x);if(k&&!byLabel.has(k))byLabel.set(k,u.key);});});
+  const fieldOf=h=>{const s=uxNorm(h);if(!s)return null;const fk=UX_FIELDS.find(f=>f[0]===s);if(fk)return fk[0];
+    if(/^ticket/.test(s))return"ticket";if(/^(loc|location) ?(#|no|number)?$/.test(s)&&!/street/.test(s)&&s!=="location")return"locno";if(/^(es )?pole ?(#|no|number)?$/.test(s))return"pole";if(/^(work )?date/.test(s))return"date";if(/crew|lead|foreman/.test(s))return"crew";
+    if(/^(fwo|field work order)/.test(s))return"fwo";if(/^(wo|work order|job)/.test(s))return"wo";if(/^awc/.test(s))return"awc";if(/^pole set( y n)?$/.test(s))return"poleset";if(/^note/.test(s))return"notes";if(/street|address|^location$/.test(s))return"street";return null;};
+  let keyRow=-1,headRow=-1;for(let i=0;i<Math.min(g.length,15);i++){const r=g[i].map(uxNorm);if(r.includes("ticket")&&r.includes("pole"))keyRow=i;else if(headRow<0&&r.some(c=>/^(es )?pole ?(#|no)?$/.test(c)||/^ticket/.test(c)))headRow=i;}
+  if(keyRow<0&&headRow<0)throw new Error("Couldn't find the header row. The sheet needs a Pole # or Ticket ID column.");
+  const hr=keyRow>=0?keyRow:headRow;const cols=[];const unknown=[];
+  g[hr].forEach((h,ci)=>{const lab=keyRow>=0?(g[keyRow+1]||[])[ci]||h:h;const f=fieldOf(h);if(f){cols[ci]={f};return;}const k=byLabel.get(uxNorm(h));if(k){cols[ci]={k};return;}if(String(h||"").trim())unknown.push({ci,h:String(lab||h)});});
+  const start=keyRow>=0?keyRow+2:hr+1;const sheets=[];const colWarn=[];
+  for(let i=start;i<g.length;i++){const r=g[i];const v=f=>{const ci=cols.findIndex(c=>c&&c.f===f);return ci<0?"":r[ci];};
+    const qty={},warn=[];let any=false;
+    cols.forEach((c,ci)=>{if(!c||!c.k)return;const raw=r[ci];if(raw===""||raw==null)return;const n=Number(String(raw).replace(/[, ]/g,""));if(!isFinite(n)||n<0){warn.push(unitInfo(c.k).item+': "'+raw+'" isn’t a number.');return;}if(n>0){qty[c.k]=n;any=true;}});
+    unknown.forEach(u=>{const raw=r[u.ci];if(raw!==""&&raw!=null&&Number(raw)>0){warn.push('Column "'+u.h+'" ('+raw+") isn’t a unit on the rate list — add the right unit by hand.");any=true;}});
+    let d=v("date");if(typeof d==="number"&&d>20000&&d<80000){const dt=new Date(Math.round((d-25569)*86400000));d=String(dt.getUTCMonth()+1).padStart(2,"0")+"/"+String(dt.getUTCDate()).padStart(2,"0")+"/"+dt.getUTCFullYear();}
+    else if(typeof d==="string"&&/^\d{4}-\d{2}-\d{2}/.test(d)){const [y,m,dd]=d.slice(0,10).split("-");d=m+"/"+dd+"/"+y;}
+    const ps=uxNorm(v("poleset"));
+    if(!any&&!String(v("crew")||"").trim()&&!d)continue;
+    if(!any)continue;
+    sheets.push({page:i+1,ticket:String(v("ticket")||"").trim().toUpperCase(),locNo:String(v("locno")||"").trim(),pole:String(v("pole")||"").trim()+" "+String(v("street")||""),date:String(d||"").trim(),crew:String(v("crew")||"").trim(),wo:String(v("wo")||"").trim(),fwo:String(v("fwo")||"").trim(),awc:String(v("awc")||"").trim(),
+      poleSet:/^(y|yes|x|1|true)$/.test(ps)?"yes":/^(n|no|0|false)$/.test(ps)?"no":"",notes:String(v("notes")||"").trim(),qty,others:[],warn});}
+  return{sheets,excel:true,tab:name};}
