@@ -2646,7 +2646,7 @@ function payRows(d,cls){const sc=payTpl().scales;
   return(d.labor||[]).map((L,i)=>{const c=cls[i];const w=(sc.find(x=>x.cls===c)||{}).wage;const days=(d.days||[]).map((x,k)=>{const h=L.h&&L.h[k]||{};const t=(Number(h.st)||0)+(Number(h.ot)||0)+(Number(h.dt)||0);return{st:Number(h.st)||0,ot:Number(h.ot)||0,dt:Number(h.dt)||0,pd:t>0?1:0};});
     const st=days.reduce((a,x)=>a+x.st,0),ot=days.reduce((a,x)=>a+x.ot,0),dt=days.reduce((a,x)=>a+x.dt,0),pd=days.reduce((a,x)=>a+x.pd,0);
     const stp=w==null?null:w*st,otp=w==null?null:w*1.5*ot,dtp=w==null?null:w*2*dt,tot=w==null?null:stp+otp+dtp;
-    return{name:L.name,cls:c,sheetCls:L.cls,wage:w,days,st,ot,dt,pd,stp,otp,dtp,tot,perDiem:pd*150,meals:0,dues:tot==null?null:tot*0.03};});}
+    return{name:L.name,veh:L.veh||"",cls:c,sheetCls:L.cls,wage:w,days,st,ot,dt,pd,stp,otp,dtp,tot,perDiem:pd*150,meals:0,dues:tot==null?null:tot*0.03};});}
 function canPaySheet(d){return isTe(d)&&d.weekly&&(role()==="crew"?d.createdByKey===S.myKey:role()!=="viewer");}
 function openPaySheet(id,alt){
   const d=alt?alt.d:S.docs.get(id);if(!d||(!alt&&!canPaySheet(d)))return;const tp=payTpl();
@@ -2660,7 +2660,7 @@ function openPaySheet(id,alt){
     m.querySelector("#ps-body").innerHTML=(prev?'<div class="okbox" style="margin:0">Published by '+esc(prev.by)+" · "+esc(fmtT(prev.at))+" · total pay "+money(prev.totals.pay)+". Republishing replaces it.</div>":"")+
       '<p class="sub" style="margin:0">From '+esc(d.no)+": hours by day, PD = 1 for each day worked, no meals. Pay uses the template's scales ("+esc(tp.name)+'): ST × wage, OT × 1.5, DT × 2; per diem $150 per PD day; dues 3% of pay. Check each person\'s pay class.</p>'+
       '<div class="tablebox" style="max-height:52vh;overflow:auto"><table class="static"><thead><tr><th>Name</th><th>Timesheet class</th><th>Pay class</th><th class="num">Wage</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th><th class="num">PD</th><th class="num">ST pay</th><th class="num">OT pay</th><th class="num">DT pay</th><th class="num">Total pay</th><th class="num">Per diem</th><th class="num">Dues</th></tr></thead><tbody>'+
-      rows.map((r,i)=>"<tr><td><b>"+esc(r.name)+"</b></td><td>"+esc(r.sheetCls)+'</td><td><select data-c="'+i+'" aria-label="Pay class for '+esc(r.name)+'"><option value="">Pick…</option>'+opts.replace('value="'+esc(r.cls)+'"','value="'+esc(r.cls)+'" selected')+'</select></td><td class="mono num">'+(r.wage==null?'<span class="late">—</span>':money(r.wage))+'</td><td class="mono num">'+fmtN(r.st)+'</td><td class="mono num">'+fmtN(r.ot)+'</td><td class="mono num">'+fmtN(r.dt)+'</td><td class="mono num">'+r.pd+'</td><td class="mono num">'+(r.stp==null?"—":money(r.stp))+'</td><td class="mono num">'+(r.otp==null?"—":money(r.otp))+'</td><td class="mono num">'+(r.dtp==null?"—":money(r.dtp))+'</td><td class="mono num"><b>'+(r.tot==null?"—":money(r.tot))+'</b></td><td class="mono num">'+money(r.perDiem)+'</td><td class="mono num">'+(r.dues==null?"—":money(r.dues))+"</td></tr>").join("")+
+      rows.map((r,i)=>"<tr><td><b>"+esc(r.name)+"</b>"+(r.veh?'<div class="sub">'+esc(r.veh)+"</div>":"")+"</td><td>"+esc(r.sheetCls)+'</td><td><select data-c="'+i+'" aria-label="Pay class for '+esc(r.name)+'"><option value="">Pick…</option>'+opts.replace('value="'+esc(r.cls)+'"','value="'+esc(r.cls)+'" selected')+'</select></td><td class="mono num">'+(r.wage==null?'<span class="late">—</span>':money(r.wage))+'</td><td class="mono num">'+fmtN(r.st)+'</td><td class="mono num">'+fmtN(r.ot)+'</td><td class="mono num">'+fmtN(r.dt)+'</td><td class="mono num">'+r.pd+'</td><td class="mono num">'+(r.stp==null?"—":money(r.stp))+'</td><td class="mono num">'+(r.otp==null?"—":money(r.otp))+'</td><td class="mono num">'+(r.dtp==null?"—":money(r.dtp))+'</td><td class="mono num"><b>'+(r.tot==null?"—":money(r.tot))+'</b></td><td class="mono num">'+money(r.perDiem)+'</td><td class="mono num">'+(r.dues==null?"—":money(r.dues))+"</td></tr>").join("")+
       '</tbody><tfoot><tr><td colspan="4" class="num"><b>Totals (USD)</b></td><td class="mono num"><b>'+fmtN(T("st"))+'</b></td><td class="mono num"><b>'+fmtN(T("ot"))+'</b></td><td class="mono num"><b>'+fmtN(T("dt"))+'</b></td><td class="mono num"><b>'+T("pd")+'</b></td><td class="mono num">'+(miss.length?"—":money(T("stp")))+'</td><td class="mono num">'+(miss.length?"—":money(T("otp")))+'</td><td class="mono num">'+(miss.length?"—":money(T("dtp")))+'</td><td class="mono num"><b>'+(miss.length?"—":money(T("tot")))+'</b></td><td class="mono num"><b>'+money(T("perDiem"))+'</b></td><td class="mono num"><b>'+(miss.length?"—":money(T("dues")))+"</b></td></tr></tfoot></table></div>"+
       (miss.length?'<div class="banner">Pick a pay class for: '+esc(miss.map(r=>r.name).join(", "))+"</div>":'<div class="okbox" style="margin:0">Total pay '+money(T("tot"))+" + per diem "+money(T("perDiem"))+" = <b>"+money(T("tot")+T("perDiem"))+'</b> <span class="sub">(Calculated; dues '+money(T("dues"))+" are 3% of pay)</span></div>");
     m.querySelectorAll("[data-c]").forEach(el=>el.onchange=()=>{cls[+el.dataset.c]=el.value;draw();});}
@@ -2671,8 +2671,10 @@ function openPaySheet(id,alt){
     const L=tp.layout;const ed={};const ws=d.weekStart;const mdY=iso=>{const[y,mo,da]=iso.split("-");return(+mo)+"."+(+da)+"."+y.slice(2);};
     const serial=iso=>Math.round((Date.UTC(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10))-Date.UTC(1899,11,30))/864e5);
     if(L.dateCol>=0)ed[colL(L.dateCol)+L.headerRow]=serial(ws);
-    for(let r=L.firstRow;r<=L.lastRow;r++){ed["A"+r]="";ed["B"+r]="";L.days.forEach(c=>{for(let k=0;k<5;k++)ed[colL(c+k)+r]="";});}
-    rows.forEach((p,i)=>{const r=L.firstRow+i;ed["A"+r]=p.name;ed["B"+r]=p.cls;p.days.forEach((x,k)=>{const c=L.days[k];if(x.st)ed[colL(c)+r]=x.st;if(x.ot)ed[colL(c+1)+r]=x.ot;if(x.dt)ed[colL(c+2)+r]=x.dt;if(x.pd)ed[colL(c+4)+r]=1;});});
+    let notesCol=L.notesCol;if(notesCol==null){try{const a=await (await TMPL.tables(unb64(box.b64))).get(tp.tab);const hr=(a[L.headerRow-1]||[]);const ix=hr.findIndex(v=>/^\s*notes\s*$/i.test(String(v==null?"":v)));notesCol=ix>=0?ix:-1;}catch(x){notesCol=-1;}}
+    if(rows.some(r=>r.veh)&&notesCol<0)throw new Error("The pay sheet template has no NOTES column for the vehicles.");
+    for(let r=L.firstRow;r<=L.lastRow;r++){if(notesCol>=0)ed[colL(notesCol)+r]="";ed["A"+r]="";ed["B"+r]="";L.days.forEach(c=>{for(let k=0;k<5;k++)ed[colL(c+k)+r]="";});}
+    rows.forEach((p,i)=>{const r=L.firstRow+i;ed["A"+r]=p.name;ed["B"+r]=p.cls;if(p.veh&&notesCol>=0)ed[colL(notesCol)+r]=p.veh;p.days.forEach((x,k)=>{const c=L.days[k];if(x.st)ed[colL(c)+r]=x.st;if(x.ot)ed[colL(c+1)+r]=x.ot;if(x.dt)ed[colL(c+2)+r]=x.dt;if(x.pd)ed[colL(c+4)+r]=1;});});
     Object.assign(ed,tp.fix||{});
     const title=tp.title?tp.title.replace(/\d{1,2}\.\d{1,2}\.\d{2,4}/,mdY(ws)):"";if(title)ed["A1"]=title;
     const tabName=mdY(ws)+" TO "+mdY(addDays(ws,6));
@@ -2680,7 +2682,7 @@ function openPaySheet(id,alt){
     const fname=alt?alt.fname:(jobById(d.jobId)||{name:"Job"}).name+" Paysheet "+mdY(ws).replace(/\./g,"-")+".xlsx";
     const fileObj=new File([out],fname,{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const meta=await storePackage(fileObj);const T=k=>rows.reduce((a,r)=>a+(r[k]||0),0);
-    const rec={file:meta,at:new Date().toISOString(),by:S.me.name,rows:rows.map(r=>({name:r.name,cls:r.cls,wage:r.wage,st:r.st,ot:r.ot,dt:r.dt,pd:r.pd,tot:r.tot})),totals:{pay:T("tot"),perDiem:T("perDiem"),dues:T("dues"),hours:T("st")+T("ot")+T("dt")}};
+    const rec={file:meta,at:new Date().toISOString(),by:S.me.name,rows:rows.map(r=>({name:r.name,veh:r.veh||undefined,cls:r.cls,wage:r.wage,st:r.st,ot:r.ot,dt:r.dt,pd:r.pd,tot:r.tot})),totals:{pay:T("tot"),perDiem:T("perDiem"),dues:T("dues"),hours:T("st")+T("ot")+T("dt")}};
     await commitIndex(ix=>{ix.payAlias=ix.payAlias||{};const by=new Map();rows.forEach(r=>{const k=teNorm(r.sheetCls);if(!k)return;(by.get(k)||by.set(k,new Set()).get(k)).add(r.cls);});by.forEach((v,k)=>{if(v.size===1)ix.payAlias[k]=[...v][0];});},"Workflow: pay class matches");
     const ok=alt?await alt.save(rec):await commitDoc(id,x=>{x.paySheet=rec;},(prev?"Pay sheet republished: ":"Pay sheet published: ")+fname+" · pay "+money(rec.totals.pay)+" + per diem "+money(rec.totals.perDiem));
     if(ok){download(new Blob([out],{type:fileObj.type}),fname);closeOverlay();toast("Pay sheet published and downloaded");}});}
@@ -2781,7 +2783,7 @@ const roWeek=(gfKey,ws)=>{const days=roWeekDays(ws);return rosters().filter(r=>r
 const canRoEdit=gfKey=>W()&&(role()==="crew"?gfKey===S.myKey:["admin","approver"].includes(role()));
 const roDay=iso=>TE_DAYS[(new Date(iso+"T12:00:00Z").getUTCDay()+6)%7]+" "+fmtD(iso);
 const roNum=v=>{const n=Number(v);return isFinite(n)?n:0;};
-function roCounts(r){const ppl=new Set(),eq=new Set();let hrs=0;roPeople(r).forEach(w=>{ppl.add(w.name.toLowerCase());hrs+=roNum(w.st)+roNum(w.ot)+roNum(w.dt);});(r.crews||[]).forEach(c=>{(c.equip||[]).forEach(e=>eq.add(e.desc+"#"+e.unitNo));});return{crews:(r.crews||[]).length,people:ppl.size,equip:eq.size,hrs};}
+function roCounts(r){const ppl=new Set(),eq=new Set();let hrs=0;roPeople(r).forEach(w=>{ppl.add(w.name.toLowerCase());hrs+=roNum(w.st)+roNum(w.ot)+roNum(w.dt);});roAllEq(r).forEach(e=>eq.add(e.desc+"#"+e.unitNo));return{crews:(r.crews||[]).length,people:ppl.size,equip:eq.size,hrs};}
 /* equipment units known to the company: saved units + every unit seen on a weekly timesheet */
 function roUnits(){const out=[];const add=(u)=>{const k=teNorm(u.desc)+"#"+String(u.unitNo||"").trim();if(!u.desc||out.some(x=>x.k===k))return;out.push({k,desc:u.desc,unitNo:String(u.unitNo||"").trim(),items:(u.items||[]).filter(Boolean)});};
   ((S.index&&S.index.equipUnits)||[]).forEach(add);sheets().filter(isTe).forEach(s=>(s.equip||[]).forEach(add));
@@ -2797,7 +2799,9 @@ function roAggregate(list,days,jobId){
       const h=L.h[k]||(L.h[k]={st:0,ot:0,dt:0});h.st+=roNum(w.st);h.ot+=roNum(w.ot);h.dt+=roNum(w.dt);});
     (r.crews||[]).forEach(c=>{if(jobId!=null&&c.jobId!==jobId)return;(c.equip||[]).forEach(e=>{let E=equip.find(x=>teNorm(x.desc)===teNorm(e.desc)&&x.unitNo===e.unitNo);
       if(!E){E={desc:e.desc,unitNo:e.unitNo,code:"",items:(e.items||[]).filter(Boolean),h:days.map(()=>0)};equip.push(E);}E.h[k]+=roNum(e.h);});});});
-  labor.forEach(L=>{L.h=L.h.map(h=>h&&(h.st||h.ot||h.dt)?h:null);});
+  if(jobId==null)list.forEach(r=>{if(days.indexOf(r.date)<0)return;roNorm(r);RO_SUP.forEach(([k,f])=>{const who=k==="gf"?r.gf:r.foreman;if(!who||!who.name)return;const L=labor.find(x=>x.name.toLowerCase()===who.name.toLowerCase());if(!L)return;
+    (r[f]||[]).forEach(v=>{const vk=teNorm(v.desc)+"#"+(v.unitNo||"");L.vehM=L.vehM||{};const V=L.vehM[vk]||(L.vehM[vk]={desc:v.desc,unitNo:v.unitNo,h:0,days:0});V.h+=roNum(v.h);if(roNum(v.h)>0)V.days++;});});});
+  labor.forEach(L=>{L.h=L.h.map(h=>h&&(h.st||h.ot||h.dt)?h:null);if(L.vehM){const vs=Object.values(L.vehM).filter(V=>V.h>0);if(vs.length)L.veh="Vehicle: "+vs.map(V=>roVehTxt(V)+" ("+fmtN(V.h)+" hrs, "+V.days+" day"+(V.days===1?"":"s")+")").join("; ");delete L.vehM;}});
   return{labor:labor.filter(L=>L.h.some(Boolean)),equip:equip.filter(E=>E.h.some(Boolean))};}
 
 /* ---------- week panel (GF home + Payroll tab) ---------- */
@@ -2861,6 +2865,10 @@ function roNorm(d){if(!d||d._norm)return d;const crews=d.crews||(d.crews=[]);
     d.gf=gf;d.foreman=fm;}
   crews.forEach(c=>{c.workers=c.workers||[];c.equip=c.equip||[];if(c.lead===undefined){const i=c.workers.findIndex(w=>w.role==="Lead/Head Lineman");c.lead=i<0?null:c.workers.splice(i,1)[0];}delete c.foreman;});
   Object.defineProperty(d,"_norm",{value:true,enumerable:false,configurable:true});return d;}
+const RO_SUP=[["gf","gfEquip","General Foreman"],["fm","fmEquip","Foreman"]];
+function roEq(d,k){if(k==="gf")return d.gfEquip||(d.gfEquip=[]);if(k==="fm")return d.fmEquip||(d.fmEquip=[]);return d.crews[+k].equip;}
+function roAllEq(d){return(d.gfEquip||[]).concat(d.fmEquip||[],(d.crews||[]).flatMap(c=>c.equip||[]));}
+const roVehTxt=v=>v.desc+(v.unitNo?" #"+v.unitNo:"");
 function roPeople(r,jobId){roNorm(r);const out=[];const supJob=(r.crews||[]).map(c=>c.jobId).find(Boolean)||"";
   if(jobId==null||supJob===jobId){if(r.gf&&r.gf.name)out.push(r.gf);if(r.foreman&&r.foreman.name)out.push(r.foreman);}
   (r.crews||[]).forEach(c=>{if(jobId!=null&&c.jobId!==jobId)return;if(c.lead&&c.lead.name)out.push(c.lead);(c.workers||[]).forEach(w=>out.push(w));});return out;}
@@ -2895,7 +2903,10 @@ function renderRoster(){
       '<div class="ro-acts"><button class="btn" type="button" id="ro-fresh">Start fresh</button><span class="sub">Copied rosters keep the General Foreman, Foreman, crews, Lead Linemen, crew members and equipment; hours reset to '+(d.weather?"2 ST":"8 ST + 2 OT")+".</span></div></section>":"")+
     (showStart?"":
       '<section class="ro-crew ro-top"><h2 class="sec" style="margin:0 0 8px">Supervision</h2><div class="tablebox"><table class="static ro-t">'+leadHead+"<tbody>"+
-        leadRow("gf","General Foreman",d.gf,"Creating this roster")+leadRow("foreman","Foreman",d.foreman,"Oversees all crews")+"</tbody></table></div></section>"+
+        leadRow("gf","General Foreman",d.gf,"Creating this roster")+leadRow("foreman","Foreman",d.foreman,"Oversees all crews")+"</tbody></table></div>"+
+        RO_SUP.map(([k,f,lab])=>{const L=roEq(d,k);return'<h3 class="pv-h3">'+lab+" vehicles ("+L.length+')<span class="sub" style="text-transform:none;letter-spacing:0;font-weight:400"> · pay sheet only, not billed on T&amp;E</span></h3>'+
+          (L.length?'<div class="tablebox"><table class="static ro-t"><thead><tr><th>Vehicle</th><th>Unit #</th><th class="num">Hours</th><th></th></tr></thead><tbody>'+L.map((e,i)=>"<tr><td><b>"+esc(e.desc)+"</b>"+(e.isNew?' <span class="chip c-sch">New</span>':"")+'</td><td class="mono">'+esc(e.unitNo||"")+'</td><td><input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-vk="'+k+'" data-ei="'+i+'" value="'+esc(e.h)+'" aria-label="Hours for '+esc(e.desc)+'"'+(ed?"":" disabled")+"></td><td>"+(ed?'<button class="btn sm" type="button" data-rmv="'+k+"-"+i+'" aria-label="Remove '+esc(e.desc)+'">✕</button>':"")+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No vehicle yet.</p>')+
+          (ed?'<div class="ro-acts"><button class="btn" type="button" data-adde="'+k+'">+ Add '+lab+" vehicle</button></div>":"");}).join("")+"</section>"+
       d.crews.map((c,ci)=>'<section class="ro-crew" data-ci="'+ci+'"><div class="ro-ch"><h2 class="sec" style="margin:0">Crew '+(ci+1)+(c.lead?" — "+esc(c.lead.name):"")+"</h2>"+(ed&&d.crews.length>1?'<button class="btn sm" type="button" data-rmcrew="'+ci+'">Remove crew</button>':"")+"</div>"+
         '<div class="tablebox"><table class="static ro-t">'+leadHead+"<tbody>"+leadRow("lead-"+ci,"Lead Lineman",c.lead,"Runs this crew")+"</tbody></table></div>"+
         '<div class="ro-fields" style="margin-top:8px"><label class="f">T&amp;E job (for billing)<select data-ci="'+ci+'" data-k="jobId"'+(ed?"":" disabled")+'><option value="">None — payroll only</option>'+tj.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===c.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+(c.jobId&&!tj.some(j=>j.id===c.jobId)?'<option value="'+esc(c.jobId)+'" selected>'+esc((jobById(c.jobId)||{name:"(removed job)"}).name)+"</option>":"")+"</select></label>"+
@@ -2921,19 +2932,21 @@ function renderRoster(){
       if(k==="role")c.workers[+el.dataset.wi].role=el.value;else if(k==="eh")c.equip[+el.dataset.ei].h=el.value;else c[k]=el.value;};});
   main.querySelectorAll("[data-h]").forEach(el=>{el.oninput=()=>{st.dirty=true;const w=slotGet(el.dataset.slot);if(!w)return;w[el.dataset.h]=el.value;const t=main.querySelector('[data-tot="'+el.dataset.slot+'"]');if(t)t.textContent=tot(w);};});
   main.querySelectorAll("[data-rmw]").forEach(b=>b.onclick=()=>{const [ci,i]=b.dataset.rmw.split("-").map(Number);d.crews[ci].workers.splice(i,1);redraw();});
+  main.querySelectorAll("[data-vk]").forEach(el=>el.oninput=()=>{st.dirty=true;roEq(d,el.dataset.vk)[+el.dataset.ei].h=el.value;});
+  main.querySelectorAll("[data-rmv]").forEach(b=>b.onclick=()=>{const [k,i]=b.dataset.rmv.split("-");roEq(d,k).splice(+i,1);redraw();});
   main.querySelectorAll("[data-rme]").forEach(b=>b.onclick=()=>{const [ci,i]=b.dataset.rme.split("-").map(Number);d.crews[ci].equip.splice(i,1);redraw();});
   main.querySelectorAll("[data-rmcrew]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.rmcrew];if((c.lead||c.workers.length||c.equip.length)&&!confirm("Remove crew "+(+b.dataset.rmcrew+1)+" and everyone on it?"))return;d.crews.splice(+b.dataset.rmcrew,1);redraw();});
   main.querySelectorAll("[data-def]").forEach(b=>b.onclick=()=>{const D=roDef(d);const c=d.crews[+b.dataset.def];[c.lead].concat(c.workers).filter(Boolean).forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});redraw();});
   main.querySelectorAll("[data-defe]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.defe];const hs=[c.lead].concat(c.workers).filter(Boolean).map(w=>roNum(w.st)+roNum(w.ot)+roNum(w.dt));const mx=hs.length?Math.max(...hs):RO_DEF.eq;c.equip.forEach(e=>{e.h=mx;});redraw();});
   main.querySelectorAll("[data-addw]").forEach(b=>b.onclick=()=>roPickWorkers(st,+b.dataset.addw,redraw));
-  main.querySelectorAll("[data-adde]").forEach(b=>b.onclick=()=>roPickEquip(st,+b.dataset.adde,redraw));
+  main.querySelectorAll("[data-adde]").forEach(b=>b.onclick=()=>{const k=b.dataset.adde;roPickEquip(st,/^\d+$/.test(k)?+k:k,redraw);});
   const ac=document.getElementById("ro-addcrew");if(ac)ac.onclick=()=>{d.crews.push(roNewCrew());redraw();};
-  const applyHrs=()=>{const D=roDef(d);roPeople(d).forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});d.crews.forEach(c=>c.equip.forEach(e=>{e.h=D.eq;}));};
+  const applyHrs=()=>{const D=roDef(d);roPeople(d).forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});roAllEq(d).forEach(e=>{e.h=D.eq;});};
   const wx=document.getElementById("ro-wx");if(wx)wx.onchange=()=>{d.weather=wx.checked;applyHrs();redraw();toast(d.weather?"Inclement Weather Day: everyone set to 2 ST, equipment to 0 hours.":"Weather day removed: hours back to 8 ST + 2 OT, equipment 10.",5000);};
   const fr=document.getElementById("ro-fresh");if(fr)fr.onclick=()=>{st.started=true;redraw();};
   const us=document.getElementById("ro-use");if(us)us.onclick=()=>{const src=rosters().find(r=>r.id===document.getElementById("ro-from").value);if(!src)return;
     const cp=roNorm(JSON.parse(JSON.stringify(src)));const clean=w=>w?Object.assign(w,{isNew:false}):null;
-    d.gf=clean(cp.gf)||d.gf;d.foreman=clean(cp.foreman);
+    d.gf=clean(cp.gf)||d.gf;d.foreman=clean(cp.foreman);d.gfEquip=(cp.gfEquip||[]).map(e=>Object.assign(e,{isNew:false}));d.fmEquip=(cp.fmEquip||[]).map(e=>Object.assign(e,{isNew:false}));
     d.crews=(cp.crews||[]).map(c=>Object.assign(c,{id:newId("c-"),lead:clean(c.lead),workers:(c.workers||[]).map(clean),equip:(c.equip||[]).map(e=>Object.assign(e,{isNew:false}))}));
     if(!d.crews.length)d.crews=[roNewCrew()];applyHrs();st.started=true;redraw();
     toast("Copied from "+roDay(src.date)+": "+d.crews.length+" crew"+(d.crews.length===1?"":"s")+". Hours set to "+(d.weather?"2 ST":"8 ST + 2 OT")+".",5000);};
@@ -2942,13 +2955,13 @@ function renderRoster(){
       await commitIndex(ix=>{delete ix.docs[st.id];},"Workflow: roster deleted");S.docs.delete(st.id);S.rEdit=null;toast("Roster deleted");location.hash=back.slice(1);},{danger:true});};
   document.getElementById("ro-save").onclick=async e=>{const err=document.getElementById("ro-err");err.textContent="";const b=e.target;
     try{const out=roValidate(d);if(!canSave())return;b.disabled=true;b.textContent="Saving…";
-      const newPeople=[],newUnits=[];roPeople(d).forEach(w=>{if(w.isNew)newPeople.push({name:w.name,role:w.role});delete w.isNew;});d.crews.forEach(c=>c.equip.forEach(x=>{if(x.isNew)newUnits.push({desc:x.desc,unitNo:x.unitNo,items:x.items});delete x.isNew;}));
+      const newPeople=[],newUnits=[];roPeople(d).forEach(w=>{if(w.isNew)newPeople.push({name:w.name,role:w.role});delete w.isNew;});roAllEq(d).forEach(x=>{if(x.isNew)newUnits.push({desc:x.desc,unitNo:x.unitNo,items:x.items});delete x.isNew;});
       if(newPeople.length||newUnits.length)await commitIndex(ix=>{ix.roster=ix.roster||[];newPeople.forEach(p=>{if(!ix.roster.some(x=>x.name.toLowerCase()===p.name.toLowerCase()))ix.roster.push({id:newId("w-"),name:p.name,role:p.role,addedBy:S.me.name,addedAt:new Date().toISOString()});});
         ix.equipUnits=ix.equipUnits||[];newUnits.forEach(u=>{if(!ix.equipUnits.some(x=>teNorm(x.desc)===teNorm(u.desc)&&String(x.unitNo)===String(u.unitNo)))ix.equipUnits.push({id:newId("u-"),desc:u.desc,unitNo:u.unitNo,items:u.items,addedBy:S.me.name,addedAt:new Date().toISOString()});});},"Workflow: roster people and equipment");
       const hist=(d.weather?"Inclement Weather Day · ":"")+"Roster saved: "+out;
-      if(st.id){const ok=await commitDoc(st.id,x=>{x.gf=d.gf;x.foreman=d.foreman;x.crews=d.crews;x.notes=d.notes||"";x.weather=!!d.weather;},hist);if(!ok){b.disabled=false;b.textContent="Save roster";return;}}
+      if(st.id){const ok=await commitDoc(st.id,x=>{x.gf=d.gf;x.foreman=d.foreman;x.gfEquip=d.gfEquip||[];x.fmEquip=d.fmEquip||[];x.crews=d.crews;x.notes=d.notes||"";x.weather=!!d.weather;},hist);if(!ok){b.disabled=false;b.textContent="Save roster";return;}}
       else{if(roOf(d.gfKey,d.date))throw new Error("A roster for "+roDay(d.date)+" was just saved by someone else. Reload and open it.");
-        const doc={date:d.date,gfKey:d.gfKey,gfName:d.gfName,gf:d.gf,foreman:d.foreman,crews:d.crews,notes:d.notes||"",weather:!!d.weather};const id=await createDoc("roster",doc,hist);if(!id){b.disabled=false;b.textContent="Save roster";return;}}
+        const doc={date:d.date,gfKey:d.gfKey,gfName:d.gfName,gf:d.gf,foreman:d.foreman,gfEquip:d.gfEquip||[],fmEquip:d.fmEquip||[],crews:d.crews,notes:d.notes||"",weather:!!d.weather};const id=await createDoc("roster",doc,hist);if(!id){b.disabled=false;b.textContent="Save roster";return;}}
       S.rEdit=null;toast("Roster saved for "+roDay(d.date),4000);location.hash=back.slice(1);}
     catch(x){err.textContent=x.message||String(x);b.disabled=false;b.textContent="Save roster";}};}
 function roValidate(d){roNorm(d);
@@ -2961,6 +2974,7 @@ function roValidate(d){roNorm(d);
     const t=roNum(w.st)+roNum(w.ot)+roNum(w.dt);if(t>24)throw new Error(where+": "+w.name+" has "+fmtN(t)+" hours. A day can't be more than 24.");ppl++;hrs+=t;
     w.st=roNum(w.st);w.ot=roNum(w.ot);w.dt=roNum(w.dt);};
   check(d.gf,"General Foreman");check(d.foreman,"Foreman");
+  RO_SUP.forEach(([k,f,lab])=>(d[f]||[]).forEach(e=>{const v=Number(e.h);if(e.h===""||!isFinite(v)||v<0||v>24)throw new Error(lab+" vehicle "+roVehTxt(e)+": hours must be 0–24.");e.h=v;}));
   d.crews.forEach((c,ci)=>{const n="Crew "+(ci+1);if(!c.lead||!c.lead.name)throw new Error(n+": pick the Lead Lineman.");check(c.lead,n+" Lead Lineman");
     c.workers.forEach(w=>check(w,n));
     c.equip.forEach(e=>{const v=Number(e.h);if(!isFinite(v)||v<0||v>24)throw new Error(n+": "+e.desc+" hours must be 0–24.");e.h=v;
@@ -2984,9 +2998,9 @@ function roPickWorkers(st,ci,done){const d=st.doc;const on=new Set(roPeople(d).m
     c.workers.push(...add);
     closeOverlay();done();};}
 
-function roPickEquip(st,ci,done){const d=st.doc;const on=new Set(d.crews.flatMap(c=>c.equip.map(e=>teNorm(e.desc)+"#"+String(e.unitNo||"").trim())));
+function roPickEquip(st,ci,done){const d=st.doc;const on=new Set(roAllEq(d).map(e=>teNorm(e.desc)+"#"+String(e.unitNo||"").trim()));const sup=typeof ci==="string";const supLab=ci==="gf"?"General Foreman":"Foreman";
   const list=roUnits().filter(u=>!on.has(u.k));
-  const m=modal("Add equipment — crew "+(ci+1),'<input type="search" id="re-q" placeholder="Search equipment or unit #…" aria-label="Search equipment" style="width:100%;padding:8px 10px;border:1px solid var(--field);border-radius:6px">'+
+  const m=modal(sup?"Add vehicle — "+supLab:"Add equipment — crew "+(ci+1),'<input type="search" id="re-q" placeholder="Search equipment or unit #…" aria-label="Search equipment" style="width:100%;padding:8px 10px;border:1px solid var(--field);border-radius:6px">'+
     '<div class="ulist" id="re-list" style="max-height:40vh;overflow:auto;margin-top:8px">'+(list.length?list.map((u,i)=>'<label class="u" style="grid-template-columns:auto 1fr;cursor:pointer" data-hay="'+esc((u.desc+" "+u.unitNo+" "+u.items.join(" ")).toLowerCase())+'"><input type="checkbox" data-ui="'+i+'"><span><b>'+esc(u.desc)+"</b>"+(u.unitNo?' <span class="mono">#'+esc(u.unitNo)+"</span>":"")+'<br><span class="sub">'+(u.items.length?esc(u.items.join(" + ")):"No rate item")+"</span></span></label>").join(""):'<p class="sub">No saved equipment yet. Add a unit below.</p>')+"</div>"+
     '<details style="margin-top:10px"'+(list.length?"":" open")+'><summary>Equipment not on the list</summary><div class="row-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px"><label class="f" style="flex:2 1 200px">Description<input id="re-nd" placeholder="e.g. Bucket Truck"></label><label class="f" style="flex:1 1 100px">Unit #<input id="re-nu"></label></div>'+
       '<div class="row-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px"><label class="f" style="flex:1 1 240px">Rate item (T&amp;E pricing)<span id="re-i1">'+equipSelect("")+'</span></label><label class="f" style="flex:1 1 240px">Second rate item (optional — e.g. pole trailer)<span id="re-i2">'+equipSelect("")+"</span></label></div>"+
@@ -2994,14 +3008,14 @@ function roPickEquip(st,ci,done){const d=st.doc;const on=new Set(d.crews.flatMap
     '<p class="sub" style="margin:8px 0 0">Hours start at 10 (8 ST + 2 OT).</p>',
     '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="re-go">Add</button>',"wide");
   const q=m.querySelector("#re-q");q.oninput=()=>{const v=q.value.trim().toLowerCase();m.querySelectorAll("#re-list label").forEach(l=>{l.hidden=!!v&&l.dataset.hay.indexOf(v)<0;});};setTimeout(()=>q.focus(),50);
-  m.querySelector("#re-go").onclick=()=>{const msg=m.querySelector("[data-msg]");const c=d.crews[ci];const add=[];
+  m.querySelector("#re-go").onclick=()=>{const msg=m.querySelector("[data-msg]");const tgt=roEq(d,ci);const add=[];
     m.querySelectorAll("[data-ui]:checked").forEach(cb=>{const u=list[+cb.dataset.ui];add.push({desc:u.desc,unitNo:u.unitNo,items:u.items.slice(),h:roDef(d).eq});});
     const nd=m.querySelector("#re-nd").value.trim(),nu=m.querySelector("#re-nu").value.trim();const i1=m.querySelector("#re-i1 select").value,i2=m.querySelector("#re-i2 select").value;
     if(nd){const k=teNorm(nd)+"#"+nu;if(on.has(k)||add.some(a=>teNorm(a.desc)+"#"+a.unitNo===k)){msg.textContent=nd+(nu?" #"+nu:"")+" is already on this roster.";return;}
       const al=((S.index&&S.index.teAlias&&S.index.teAlias.equip)||{})[teNorm(nd)]||[];const items=[i1,i2].filter(Boolean);
       add.push({desc:nd,unitNo:nu,items:items.length?items:al.slice(),h:roDef(d).eq,isNew:true});}
     if(!add.length){msg.textContent="Tick at least one unit, or enter new equipment.";return;}
-    c.equip.push(...add);closeOverlay();done();};}
+    tgt.push(...add);closeOverlay();done();};}
 
 /* Payroll tab: any General Foreman's rosters for the week (admins / billing) */
 function roAdminSection(host){if(!host)return;const prof=(S.index&&S.index.profiles)||{};
@@ -3019,6 +3033,7 @@ function renderRosters(){
     '<div class="filters"><button class="btn sm" type="button" data-d="-1" aria-label="Previous day">‹</button><input type="date" id="rs-day" value="'+esc(day)+'" aria-label="Day"><button class="btn sm" type="button" data-d="1" aria-label="Next day">›</button>'+(day!==todayStr()?'<button class="btn sm" type="button" data-d="0">Today</button>':"")+'<span class="count"><b>'+esc(roDay(day))+"</b> · "+list.length+" roster"+(list.length===1?"":"s")+" · "+tot.crews+" crews · "+tot.people+" people · "+tot.equip+" equipment · "+fmtN(tot.hrs)+" labor hrs</span></div>"+
     (list.length?list.map(r=>'<section class="ro-crew"><div class="ro-ch"><h2 class="sec" style="margin:0">'+esc(r.gfName)+(r.weather?" "+wxChip:"")+'</h2><button class="btn sm" type="button" data-open="'+esc(r.id)+'">'+(canRoEdit(r.gfKey)?"Open / edit":"Open")+"</button></div>"+
       (roNorm(r),"")+'<p style="margin:0 0 6px"><b>General Foreman:</b> '+esc((r.gf||{}).name||"—")+(r.gf?' <span class="sub">('+fmtN(r.gf.st)+" ST / "+fmtN(r.gf.ot)+" OT / "+fmtN(r.gf.dt)+" DT)</span>":"")+' &nbsp; <b>Foreman:</b> '+esc((r.foreman||{}).name||"—")+(r.foreman?' <span class="sub">('+fmtN(r.foreman.st)+" ST / "+fmtN(r.foreman.ot)+" OT / "+fmtN(r.foreman.dt)+" DT)</span>":"")+"</p>"+
+      RO_SUP.map(([k,f,lab])=>(r[f]||[]).length?'<p class="sub" style="margin:0 0 6px">'+lab+" vehicle: "+r[f].map(v=>esc(roVehTxt(v))+" ("+fmtN(v.h)+" hrs)").join(", ")+"</p>":"").join("")+
       (r.crews||[]).map((c,ci)=>{const j=c.jobId?jobById(c.jobId):null;
         return'<h3 class="pv-h3">Crew '+(ci+1)+(c.lead?" — Lead Lineman "+esc(c.lead.name):"")+(j?' · <span class="chip c-sch">'+esc(j.name)+" (T&amp;E)</span>":"")+"</h3>"+(c.notes?'<p class="sub" style="margin:0 0 6px">'+esc(c.notes)+"</p>":"")+
           '<div class="ro-two"><div class="tablebox"><table class="static"><thead><tr><th>Worker</th><th>Classification</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th></tr></thead><tbody>'+(c.lead?[Object.assign({lead:1},c.lead)]:[]).concat(c.workers||[]).map(w=>"<tr><td><b>"+esc(w.name)+"</b></td><td>"+esc(w.role)+'</td><td class="mono num">'+fmtN(w.st)+'</td><td class="mono num">'+fmtN(w.ot)+'</td><td class="mono num">'+fmtN(w.dt)+"</td></tr>").join("")+"</tbody></table></div>"+
