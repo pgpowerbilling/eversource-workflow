@@ -12,7 +12,7 @@ const roWeek=(gfKey,ws)=>{const days=roWeekDays(ws);return rosters().filter(r=>r
 const canRoEdit=gfKey=>W()&&(role()==="crew"?gfKey===S.myKey:["admin","approver"].includes(role()));
 const roDay=iso=>TE_DAYS[(new Date(iso+"T12:00:00Z").getUTCDay()+6)%7]+" "+fmtD(iso);
 const roNum=v=>{const n=Number(v);return isFinite(n)?n:0;};
-function roCounts(r){const ppl=new Set(),eq=new Set();let hrs=0;(r.crews||[]).forEach(c=>{(c.workers||[]).forEach(w=>{ppl.add(w.name.toLowerCase());hrs+=roNum(w.st)+roNum(w.ot)+roNum(w.dt);});(c.equip||[]).forEach(e=>eq.add(e.desc+"#"+e.unitNo));});return{crews:(r.crews||[]).length,people:ppl.size,equip:eq.size,hrs};}
+function roCounts(r){const ppl=new Set(),eq=new Set();let hrs=0;roPeople(r).forEach(w=>{ppl.add(w.name.toLowerCase());hrs+=roNum(w.st)+roNum(w.ot)+roNum(w.dt);});(r.crews||[]).forEach(c=>{(c.equip||[]).forEach(e=>eq.add(e.desc+"#"+e.unitNo));});return{crews:(r.crews||[]).length,people:ppl.size,equip:eq.size,hrs};}
 /* equipment units known to the company: saved units + every unit seen on a weekly timesheet */
 function roUnits(){const out=[];const add=(u)=>{const k=teNorm(u.desc)+"#"+String(u.unitNo||"").trim();if(!u.desc||out.some(x=>x.k===k))return;out.push({k,desc:u.desc,unitNo:String(u.unitNo||"").trim(),items:(u.items||[]).filter(Boolean)});};
   ((S.index&&S.index.equipUnits)||[]).forEach(add);sheets().filter(isTe).forEach(s=>(s.equip||[]).forEach(add));
@@ -23,11 +23,10 @@ function roGfName(gfKey){const p=S.index&&S.index.profiles&&S.index.profiles[gfK
 /* labor + equipment for a week, summed per person / unit per day (all crews, or only crews on one job) */
 function roAggregate(list,days,jobId){
   const labor=[],equip=[];
-  list.forEach(r=>{const k=days.indexOf(r.date);if(k<0)return;(r.crews||[]).forEach(c=>{if(jobId!=null&&c.jobId!==jobId)return;
-    (c.workers||[]).forEach(w=>{let L=labor.find(x=>x.name.toLowerCase()===w.name.toLowerCase());
+  list.forEach(r=>{const k=days.indexOf(r.date);if(k<0)return;roPeople(r,jobId).forEach(w=>{let L=labor.find(x=>x.name.toLowerCase()===w.name.toLowerCase());
       if(!L){L={pid:w.pid||"",name:w.name,role:w.role,cls:RO_ROLE_CODE[w.role]||"",code:RO_ROLE_CODE[w.role]||"",h:days.map(()=>null),pdDays:0,lodgeNights:0};labor.push(L);}
       const h=L.h[k]||(L.h[k]={st:0,ot:0,dt:0});h.st+=roNum(w.st);h.ot+=roNum(w.ot);h.dt+=roNum(w.dt);});
-    (c.equip||[]).forEach(e=>{let E=equip.find(x=>teNorm(x.desc)===teNorm(e.desc)&&x.unitNo===e.unitNo);
+    (r.crews||[]).forEach(c=>{if(jobId!=null&&c.jobId!==jobId)return;(c.equip||[]).forEach(e=>{let E=equip.find(x=>teNorm(x.desc)===teNorm(e.desc)&&x.unitNo===e.unitNo);
       if(!E){E={desc:e.desc,unitNo:e.unitNo,code:"",items:(e.items||[]).filter(Boolean),h:days.map(()=>0)};equip.push(E);}E.h[k]+=roNum(e.h);});});});
   labor.forEach(L=>{L.h=L.h.map(h=>h&&(h.st||h.ot||h.dt)?h:null);});
   return{labor:labor.filter(L=>L.h.some(Boolean)),equip:equip.filter(E=>E.h.some(Boolean))};}
@@ -69,7 +68,7 @@ async function roMakeTe(gfKey,ws,jobId,btn){const j=jobById(jobId);const days=ro
   if(!agg.labor.length){toast("No hours for "+j.name+" on this week's rosters.");return;}
   const noRole=agg.labor.filter(L=>!L.role);if(noRole.length){toast("Pick a classification for "+noRole.map(L=>L.name).join(", ")+" on the rosters.",8000);return;}
   const noItem=agg.equip.filter(E=>!E.items.length);if(noItem.length){toast("Match a rate item for "+noItem.map(E=>E.desc+(E.unitNo?" #"+E.unitNo:"")).join(", ")+" on the rosters.",8000);return;}
-  const crews=list.flatMap(r=>(r.crews||[]).filter(c=>c.jobId===jobId));const foremen=[...new Set(crews.map(c=>String(c.foreman||"").trim()).filter(Boolean))];
+  const crews=list.flatMap(r=>(r.crews||[]).filter(c=>c.jobId===jobId));const foremen=[...new Set(list.filter(r=>(r.crews||[]).some(c=>c.jobId===jobId)).map(r=>String((roNorm(r).foreman||{}).name||"").trim()).filter(Boolean))];
   const patch={kind:"te",weekly:true,jobId,poleId:"",poleText:"",weekStart:ws,weekEnd:days[5],days,workDate:ws,crew:foremen.join(", "),gf:roGfName(gfKey),wo:j.wo||"",fwo:"",notes:[...new Set(crews.map(c=>String(c.notes||"").trim()).filter(Boolean))].concat(list.filter(r=>r.weather&&(r.crews||[]).some(c=>c.jobId===jobId)).length?["Inclement Weather Day: "+list.filter(r=>r.weather&&(r.crews||[]).some(c=>c.jobId===jobId)).map(r=>roDay(r.date)).join(", ")]:[]).join(" | "),
     labor:agg.labor,equip:agg.equip,subs:[],imported:{fromRosters:true,rosterGf:gfKey,rosters:list.map(r=>r.id),town:j.town||""}};
   const sum=teWeekText(patch)+" · "+agg.labor.length+" people · "+fmtN(teHours(patch))+" labor hrs · "+agg.equip.length+" equipment";
@@ -81,94 +80,127 @@ async function roMakeTe(gfKey,ws,jobId,btn){const j=jobById(jobId);const days=ro
   else{patch.status=ST.SUB;patch.submittedAt=new Date().toISOString();const id=await createDoc("sheet",patch,"Created from daily rosters: "+sum);if(id){toast((S.docs.get(id)||{}).no+" created from the rosters and sent to the CM",6000);refresh();}}}
 
 /* ---------- roster editor (full page) ---------- */
+/* roster structure: General Foreman (top) → Foreman (oversees all crews) → crews, each with a Lead Lineman + crew members.
+   Older rosters kept everyone in crew.workers; roNorm moves them into the slots the first time they are opened or counted. */
+const RO_SLOT_ROLE={gf:"General Foreman",foreman:"Foreman",lead:"Lead/Head Lineman"};
+function roNorm(d){if(!d||d._norm)return d;const crews=d.crews||(d.crews=[]);
+  if(d.gf===undefined&&d.foreman===undefined){
+    const take=(c,pred)=>{const i=(c.workers||[]).findIndex(pred);return i<0?null:c.workers.splice(i,1)[0];};
+    let gf=null;for(const c of crews){gf=take(c,w=>w.role==="General Foreman");if(gf)break;}
+    let fm=null;for(const c of crews){if(c.foreman){fm=take(c,w=>w.name===c.foreman);if(fm)break;}}
+    if(!fm)for(const c of crews){fm=take(c,w=>w.role==="Foreman");if(fm)break;}
+    d.gf=gf;d.foreman=fm;}
+  crews.forEach(c=>{c.workers=c.workers||[];c.equip=c.equip||[];if(c.lead===undefined){const i=c.workers.findIndex(w=>w.role==="Lead/Head Lineman");c.lead=i<0?null:c.workers.splice(i,1)[0];}delete c.foreman;});
+  Object.defineProperty(d,"_norm",{value:true,enumerable:false,configurable:true});return d;}
+function roPeople(r,jobId){roNorm(r);const out=[];const supJob=(r.crews||[]).map(c=>c.jobId).find(Boolean)||"";
+  if(jobId==null||supJob===jobId){if(r.gf&&r.gf.name)out.push(r.gf);if(r.foreman&&r.foreman.name)out.push(r.foreman);}
+  (r.crews||[]).forEach(c=>{if(jobId!=null&&c.jobId!==jobId)return;if(c.lead&&c.lead.name)out.push(c.lead);(c.workers||[]).forEach(w=>out.push(w));});return out;}
+const roNewCrew=()=>({id:newId("c-"),lead:null,jobId:"",notes:"",workers:[],equip:[]});
+function roPerson(name,role,D,src){const p=((S.index&&S.index.roster)||[]).find(x=>x.name.toLowerCase()===String(name).toLowerCase());return{pid:p?p.id:"",name:p?p.name:name,role,st:src?src.st:D.st,ot:src?src.ot:D.ot,dt:src?src.dt:D.dt};}
 function renderRoster(){
   const key=S.docId;let st=S.rEdit&&S.rEdit.key===key?S.rEdit:null;
   if(!st){let doc,id=null;
     if(key.indexOf("new-")===0){const [date,gk]=key.slice(4).split("~");const gfKey=gk||S.myKey;const ex=roOf(gfKey,date);if(ex){location.replace("#roster-"+ex.id);return;}
       if(!canRoEdit(gfKey)){main.innerHTML='<div class="empty"><b>Not available</b></div>';return;}
-      doc={type:"roster",date,gfKey,gfName:roGfName(gfKey),crews:[{id:newId("c-"),foreman:"",jobId:"",notes:"",workers:[],equip:[]}],notes:""};}
+      const gn=roGfName(gfKey);doc={type:"roster",date,gfKey,gfName:gn,gf:roPerson(gn,"General Foreman",RO_DEF),foreman:null,crews:[roNewCrew()],notes:""};}
     else{const d=S.docs.get(key);if(!d||d.type!=="roster"){main.innerHTML='<a class="back" href="#'+(role()==="crew"?"sheets":"rosters")+'">← Back</a><div class="empty"><b>Roster not found</b></div>';return;}
-      if(role()==="crew"&&d.gfKey!==S.myKey){location.hash="sheets";return;}id=key;doc=JSON.parse(JSON.stringify(d));}
+      if(role()==="crew"&&d.gfKey!==S.myKey){location.hash="sheets";return;}id=key;doc=roNorm(JSON.parse(JSON.stringify(d)));}
     st=S.rEdit={key,id,doc,dirty:false};}
-  const d=st.doc;const ed=canRoEdit(d.gfKey);const back=role()==="crew"?"#sheets":"#rosters";
-  const prevs=rosters().filter(r=>r.gfKey===d.gfKey&&r.date<d.date).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,30);const prev=prevs[0];
-  const empty=!d.crews.some(c=>c.workers.length||c.equip.length);const showStart=ed&&!st.id&&!st.started&&empty;
+  const d=roNorm(st.doc);const ed=canRoEdit(d.gfKey);const back=role()==="crew"?"#sheets":"#rosters";
+  const prevs=rosters().filter(r=>r.gfKey===d.gfKey&&r.date<d.date).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,30);
+  const empty=!d.foreman&&!d.crews.some(c=>c.lead||c.workers.length||c.equip.length);const showStart=ed&&!st.id&&!st.started&&empty;
   const tj=jobs().filter(j=>!j.archived&&isTeJob(j));
-  const hrsIn=(k,v,lab,i,ci)=>'<input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-ci="'+ci+'" data-wi="'+i+'" data-h="'+k+'" value="'+esc(v)+'" aria-label="'+lab+'"'+(ed?"":" disabled")+">";
+  const used=new Set(roPeople(d).map(w=>w.name.toLowerCase()));
+  const names=[...new Set(((S.index&&S.index.roster)||[]).map(p=>p.name).concat(roPeople(d).map(w=>w.name)))].sort((a,b)=>a.localeCompare(b));
+  const pick=(slot,cur,lab)=>'<select data-pick="'+slot+'" aria-label="'+lab+'"'+(ed?"":" disabled")+'><option value="">— pick —</option>'+names.filter(n=>n===cur||!used.has(n.toLowerCase())).map(n=>"<option"+(n===cur?" selected":"")+">"+esc(n)+"</option>").join("")+"</select>";
+  const hIn=(slot,k,v,lab)=>'<input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-slot="'+slot+'" data-h="'+k+'" value="'+esc(v)+'" aria-label="'+lab+'"'+(ed?"":" disabled")+">";
+  const tot=w=>fmtN(roNum(w.st)+roNum(w.ot)+roNum(w.dt));
+  const leadRow=(slot,title,w,note)=>"<tr><td class=\"ro-slot\"><b>"+title+"</b>"+(note?'<div class="sub">'+note+"</div>":"")+"</td><td>"+pick(slot,w&&w.name,title)+(w&&w.isNew?' <span class="chip c-sch">New</span>':"")+"</td>"+(w?"<td>"+hIn(slot,"st",w.st,"ST hours "+title)+"</td><td>"+hIn(slot,"ot",w.ot,"OT hours "+title)+"</td><td>"+hIn(slot,"dt",w.dt,"DT hours "+title)+'</td><td class="mono num" data-tot="'+slot+'">'+tot(w)+"</td>":'<td colspan="4" class="sub">Pick a name to add hours</td>')+"</tr>";
+  const leadHead='<thead><tr><th>Role</th><th>Name</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th><th class="num">Total</th></tr></thead>';
   main.innerHTML='<a class="back" href="'+back+'">← '+(role()==="crew"?"Overview":"Rosters")+"</a>"+
-    '<section class="jobhead"><div><h1>Roster — '+esc(roDay(d.date))+(d.weather?" "+wxChip:"")+'</h1><div class="meta"><span>General Foreman '+esc(d.gfName)+"</span>"+(st.id?"<span>Saved "+esc(fmtT((S.docs.get(st.id)||{}).updatedAt||""))+"</span>":'<span class="chip c-sch">Not saved yet</span>')+"</div></div>"+
+    '<section class="jobhead"><div><h1>Roster — '+esc(roDay(d.date))+(d.weather?" "+wxChip:"")+'</h1><div class="meta"><span>Created by General Foreman '+esc(d.gfName)+"</span>"+(st.id?"<span>Saved "+esc(fmtT((S.docs.get(st.id)||{}).updatedAt||""))+"</span>":'<span class="chip c-sch">Not saved yet</span>')+"</div></div>"+
       '<div class="acts">'+(ed&&st.id?'<button class="btn" type="button" id="ro-del">Delete roster</button>':"")+"</div></section>"+
     '<div class="ro-wx'+(d.weather?" on":"")+'"><label class="chk" style="margin:0"><input type="checkbox" id="ro-wx"'+(d.weather?" checked":"")+(ed?"":" disabled")+'> <b>Inclement Weather Day</b></label><span class="sub">'+(d.weather?"Everyone is paid 2 ST hours and equipment is at 0 hours. Logged as an Inclement Weather Day.":"Tick if the crew was sent home for weather: pay changes to 2 ST hours.")+"</span></div>"+
     (showStart?'<section class="ro-crew ro-start"><h2 class="sec" style="margin:0 0 8px">Start this roster</h2>'+
       (prevs.length?'<div class="row-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="f" style="flex:1 1 300px;margin:0">Copy a previous roster<select id="ro-from">'+prevs.map(r=>{const c=roCounts(r);return'<option value="'+esc(r.id)+'">'+esc(roDay(r.date))+" — "+c.crews+" crew"+(c.crews===1?"":"s")+", "+c.people+" people, "+c.equip+" equipment"+(r.weather?" (weather day)":"")+"</option>";}).join("")+'</select></label><button class="btn primary" type="button" id="ro-use">Use this roster</button></div>':'<p class="sub" style="margin:0 0 6px">No earlier rosters to copy yet.</p>')+
-      '<div class="ro-acts"><button class="btn" type="button" id="ro-fresh">Start fresh</button><span class="sub">Copied rosters keep the crews, people, classifications and equipment; hours reset to '+(d.weather?"2 ST":"8 ST + 2 OT")+".</span></div></section>":"")+
-    (showStart?"":d.crews.map((c,ci)=>{const opts=c.workers.map(w=>w.name);
-      return'<section class="ro-crew" data-ci="'+ci+'"><div class="ro-ch"><h2 class="sec" style="margin:0">Crew '+(ci+1)+"</h2>"+(ed&&d.crews.length>1?'<button class="btn sm" type="button" data-rmcrew="'+ci+'">Remove crew</button>':"")+"</div>"+
-        '<div class="ro-fields"><label class="f">Foreman<select data-ci="'+ci+'" data-k="foreman"'+(ed?"":" disabled")+'><option value="">Pick from the crew…</option>'+opts.map(n=>"<option"+(n===c.foreman?" selected":"")+">"+esc(n)+"</option>").join("")+"</select></label>"+
-          '<label class="f">T&amp;E job (for billing)<select data-ci="'+ci+'" data-k="jobId"'+(ed?"":" disabled")+'><option value="">None — payroll only</option>'+tj.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===c.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+(c.jobId&&!tj.some(j=>j.id===c.jobId)?'<option value="'+esc(c.jobId)+'" selected>'+esc((jobById(c.jobId)||{name:"(removed job)"}).name)+"</option>":"")+"</select></label>"+
+      '<div class="ro-acts"><button class="btn" type="button" id="ro-fresh">Start fresh</button><span class="sub">Copied rosters keep the General Foreman, Foreman, crews, Lead Linemen, crew members and equipment; hours reset to '+(d.weather?"2 ST":"8 ST + 2 OT")+".</span></div></section>":"")+
+    (showStart?"":
+      '<section class="ro-crew ro-top"><h2 class="sec" style="margin:0 0 8px">Supervision</h2><div class="tablebox"><table class="static ro-t">'+leadHead+"<tbody>"+
+        leadRow("gf","General Foreman",d.gf,"Creating this roster")+leadRow("foreman","Foreman",d.foreman,"Oversees all crews")+"</tbody></table></div></section>"+
+      d.crews.map((c,ci)=>'<section class="ro-crew" data-ci="'+ci+'"><div class="ro-ch"><h2 class="sec" style="margin:0">Crew '+(ci+1)+(c.lead?" — "+esc(c.lead.name):"")+"</h2>"+(ed&&d.crews.length>1?'<button class="btn sm" type="button" data-rmcrew="'+ci+'">Remove crew</button>':"")+"</div>"+
+        '<div class="tablebox"><table class="static ro-t">'+leadHead+"<tbody>"+leadRow("lead-"+ci,"Lead Lineman",c.lead,"Runs this crew")+"</tbody></table></div>"+
+        '<div class="ro-fields" style="margin-top:8px"><label class="f">T&amp;E job (for billing)<select data-ci="'+ci+'" data-k="jobId"'+(ed?"":" disabled")+'><option value="">None — payroll only</option>'+tj.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===c.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+(c.jobId&&!tj.some(j=>j.id===c.jobId)?'<option value="'+esc(c.jobId)+'" selected>'+esc((jobById(c.jobId)||{name:"(removed job)"}).name)+"</option>":"")+"</select></label>"+
           '<label class="f wide">Notes<input data-ci="'+ci+'" data-k="notes" value="'+esc(c.notes||"")+'"'+(ed?"":" disabled")+"></label></div>"+
-        '<h3 class="pv-h3">Workers ('+c.workers.length+")</h3>"+
+        '<h3 class="pv-h3">Crew members ('+c.workers.length+")</h3>"+
         (c.workers.length?'<div class="tablebox"><table class="static ro-t"><thead><tr><th>Name</th><th>Classification</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th><th class="num">Total</th><th></th></tr></thead><tbody>'+
-          c.workers.map((w,i)=>"<tr><td><b>"+esc(w.name)+"</b>"+(w.isNew?' <span class="chip c-sch">New</span>':"")+"</td><td>"+roleSelect(w.role,undefined,' data-ci="'+ci+'" data-wi="'+i+'" data-k="role" aria-label="Classification for '+esc(w.name)+'"'+(ed?"":" disabled"))+"</td><td>"+hrsIn("st",w.st,"ST hours "+esc(w.name),i,ci)+"</td><td>"+hrsIn("ot",w.ot,"OT hours "+esc(w.name),i,ci)+"</td><td>"+hrsIn("dt",w.dt,"DT hours "+esc(w.name),i,ci)+'</td><td class="mono num" data-tot="'+ci+"-"+i+'">'+fmtN(roNum(w.st)+roNum(w.ot)+roNum(w.dt))+"</td><td>"+(ed?'<button class="btn sm" type="button" data-rmw="'+ci+"-"+i+'" aria-label="Remove '+esc(w.name)+'">✕</button>':"")+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No workers yet.</p>')+
-        (ed?'<div class="ro-acts"><button class="btn" type="button" data-addw="'+ci+'">+ Add workers</button>'+(c.workers.length?'<button class="btn sm" type="button" data-def="'+ci+'">'+(d.weather?"Set everyone to 2 ST":"Set everyone to 8 ST + 2 OT")+"</button>":"")+"</div>":"")+
+          c.workers.map((w,i)=>"<tr><td><b>"+esc(w.name)+"</b>"+(w.isNew?' <span class="chip c-sch">New</span>':"")+"</td><td>"+roleSelect(w.role,undefined,' data-ci="'+ci+'" data-wi="'+i+'" data-k="role" aria-label="Classification for '+esc(w.name)+'"'+(ed?"":" disabled"))+"</td><td>"+hIn("w-"+ci+"-"+i,"st",w.st,"ST hours "+esc(w.name))+"</td><td>"+hIn("w-"+ci+"-"+i,"ot",w.ot,"OT hours "+esc(w.name))+"</td><td>"+hIn("w-"+ci+"-"+i,"dt",w.dt,"DT hours "+esc(w.name))+'</td><td class="mono num" data-tot="w-'+ci+"-"+i+'">'+tot(w)+"</td><td>"+(ed?'<button class="btn sm" type="button" data-rmw="'+ci+"-"+i+'" aria-label="Remove '+esc(w.name)+'">✕</button>':"")+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No crew members yet.</p>')+
+        (ed?'<div class="ro-acts"><button class="btn" type="button" data-addw="'+ci+'">+ Add crew members</button>'+(c.workers.length||c.lead?'<button class="btn sm" type="button" data-def="'+ci+'">'+(d.weather?"Set crew to 2 ST":"Set crew to 8 ST + 2 OT")+"</button>":"")+"</div>":"")+
         '<h3 class="pv-h3">Equipment ('+c.equip.length+")</h3>"+
         (c.equip.length?'<div class="tablebox"><table class="static ro-t"><thead><tr><th>Equipment</th><th>Unit #</th><th>Rate item'+(c.jobId?"":' <span class="sub">(for T&amp;E billing)</span>')+'</th><th class="num">Hours</th><th></th></tr></thead><tbody>'+
           c.equip.map((e,i)=>"<tr><td><b>"+esc(e.desc)+"</b>"+(e.isNew?' <span class="chip c-sch">New</span>':"")+'</td><td class="mono">'+esc(e.unitNo||"")+'</td><td class="sub">'+(e.items&&e.items.length?esc(e.items.join(" + ")):'<span class="late">Not matched</span>')+'</td><td><input type="number" min="0" max="24" step="0.5" inputmode="decimal" data-ci="'+ci+'" data-ei="'+i+'" data-k="eh" value="'+esc(e.h)+'" aria-label="Hours for '+esc(e.desc)+'"'+(ed?"":" disabled")+"></td><td>"+(ed?'<button class="btn sm" type="button" data-rme="'+ci+"-"+i+'" aria-label="Remove '+esc(e.desc)+'">✕</button>':"")+"</td></tr>").join("")+"</tbody></table></div>":'<p class="sub" style="margin:0">No equipment yet.</p>')+
         (ed?'<div class="ro-acts"><button class="btn" type="button" data-adde="'+ci+'">+ Add equipment</button>'+(c.equip.length?'<button class="btn sm" type="button" data-defe="'+ci+'">Match equipment to crew hours</button>':"")+"</div>":"")+
-      "</section>";}).join(""))+
+      "</section>").join(""))+
     (ed&&!showStart?'<div class="ro-acts"><button class="btn" type="button" id="ro-addcrew">+ Add another crew</button></div>':"")+
     '<div class="row-inline ro-save"><span class="err" id="ro-err" role="alert" style="margin:0 auto 0 0"></span><a class="btn" href="'+back+'">'+(ed?"Cancel":"Close")+"</a>"+(ed?'<button class="btn primary" type="button" id="ro-save">Save roster</button>':"")+"</div>";
   if(!ed)return;
   const redraw=()=>{st.dirty=true;renderRoster();};
+  const slotGet=s=>s==="gf"?d.gf:s==="foreman"?d.foreman:s.indexOf("lead-")===0?d.crews[+s.slice(5)].lead:(()=>{const [,ci,i]=s.split("-");return d.crews[+ci].workers[+i];})();
+  const slotSet=(s,v)=>{if(s==="gf")d.gf=v;else if(s==="foreman")d.foreman=v;else if(s.indexOf("lead-")===0)d.crews[+s.slice(5)].lead=v;};
+  main.querySelectorAll("[data-pick]").forEach(el=>el.onchange=()=>{const s=el.dataset.pick;const old=slotGet(s);const D=roDef(d);slotSet(s,el.value?roPerson(el.value,RO_SLOT_ROLE[s.split("-")[0]],D,old):null);redraw();});
   main.querySelectorAll("[data-k]").forEach(el=>{const ci=+el.dataset.ci,c=d.crews[ci];const ev=el.tagName==="SELECT"?"onchange":"oninput";
     el[ev]=()=>{st.dirty=true;const k=el.dataset.k;
       if(k==="role")c.workers[+el.dataset.wi].role=el.value;else if(k==="eh")c.equip[+el.dataset.ei].h=el.value;else c[k]=el.value;};});
-  main.querySelectorAll("[data-h]").forEach(el=>{el.oninput=()=>{st.dirty=true;const ci=+el.dataset.ci,i=+el.dataset.wi;const w=d.crews[ci].workers[i];w[el.dataset.h]=el.value;const t=main.querySelector('[data-tot="'+ci+"-"+i+'"]');if(t)t.textContent=fmtN(roNum(w.st)+roNum(w.ot)+roNum(w.dt));};});
-  main.querySelectorAll("[data-rmw]").forEach(b=>b.onclick=()=>{const [ci,i]=b.dataset.rmw.split("-").map(Number);const c=d.crews[ci];const [w]=c.workers.splice(i,1);if(c.foreman===w.name)c.foreman="";redraw();});
+  main.querySelectorAll("[data-h]").forEach(el=>{el.oninput=()=>{st.dirty=true;const w=slotGet(el.dataset.slot);if(!w)return;w[el.dataset.h]=el.value;const t=main.querySelector('[data-tot="'+el.dataset.slot+'"]');if(t)t.textContent=tot(w);};});
+  main.querySelectorAll("[data-rmw]").forEach(b=>b.onclick=()=>{const [ci,i]=b.dataset.rmw.split("-").map(Number);d.crews[ci].workers.splice(i,1);redraw();});
   main.querySelectorAll("[data-rme]").forEach(b=>b.onclick=()=>{const [ci,i]=b.dataset.rme.split("-").map(Number);d.crews[ci].equip.splice(i,1);redraw();});
-  main.querySelectorAll("[data-rmcrew]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.rmcrew];if((c.workers.length||c.equip.length)&&!confirm("Remove crew "+(+b.dataset.rmcrew+1)+" and everyone on it?"))return;d.crews.splice(+b.dataset.rmcrew,1);redraw();});
-  main.querySelectorAll("[data-def]").forEach(b=>b.onclick=()=>{const D=roDef(d);d.crews[+b.dataset.def].workers.forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});redraw();});
-  main.querySelectorAll("[data-defe]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.defe];const hs=c.workers.map(w=>roNum(w.st)+roNum(w.ot)+roNum(w.dt));const mx=hs.length?Math.max(...hs):RO_DEF.eq;c.equip.forEach(e=>{e.h=mx;});redraw();});
+  main.querySelectorAll("[data-rmcrew]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.rmcrew];if((c.lead||c.workers.length||c.equip.length)&&!confirm("Remove crew "+(+b.dataset.rmcrew+1)+" and everyone on it?"))return;d.crews.splice(+b.dataset.rmcrew,1);redraw();});
+  main.querySelectorAll("[data-def]").forEach(b=>b.onclick=()=>{const D=roDef(d);const c=d.crews[+b.dataset.def];[c.lead].concat(c.workers).filter(Boolean).forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});redraw();});
+  main.querySelectorAll("[data-defe]").forEach(b=>b.onclick=()=>{const c=d.crews[+b.dataset.defe];const hs=[c.lead].concat(c.workers).filter(Boolean).map(w=>roNum(w.st)+roNum(w.ot)+roNum(w.dt));const mx=hs.length?Math.max(...hs):RO_DEF.eq;c.equip.forEach(e=>{e.h=mx;});redraw();});
   main.querySelectorAll("[data-addw]").forEach(b=>b.onclick=()=>roPickWorkers(st,+b.dataset.addw,redraw));
   main.querySelectorAll("[data-adde]").forEach(b=>b.onclick=()=>roPickEquip(st,+b.dataset.adde,redraw));
-  const ac=document.getElementById("ro-addcrew");if(ac)ac.onclick=()=>{d.crews.push({id:newId("c-"),foreman:"",jobId:"",notes:"",workers:[],equip:[]});redraw();};
-  const applyHrs=()=>{const D=roDef(d);d.crews.forEach(c=>{c.workers.forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});c.equip.forEach(e=>{e.h=D.eq;});});};
+  const ac=document.getElementById("ro-addcrew");if(ac)ac.onclick=()=>{d.crews.push(roNewCrew());redraw();};
+  const applyHrs=()=>{const D=roDef(d);roPeople(d).forEach(w=>{w.st=D.st;w.ot=D.ot;w.dt=D.dt;});d.crews.forEach(c=>c.equip.forEach(e=>{e.h=D.eq;}));};
   const wx=document.getElementById("ro-wx");if(wx)wx.onchange=()=>{d.weather=wx.checked;applyHrs();redraw();toast(d.weather?"Inclement Weather Day: everyone set to 2 ST, equipment to 0 hours.":"Weather day removed: hours back to 8 ST + 2 OT, equipment 10.",5000);};
   const fr=document.getElementById("ro-fresh");if(fr)fr.onclick=()=>{st.started=true;redraw();};
   const us=document.getElementById("ro-use");if(us)us.onclick=()=>{const src=rosters().find(r=>r.id===document.getElementById("ro-from").value);if(!src)return;
-    d.crews=JSON.parse(JSON.stringify(src.crews||[])).map(c=>Object.assign(c,{id:newId("c-"),workers:(c.workers||[]).map(w=>Object.assign(w,{isNew:false})),equip:(c.equip||[]).map(e=>Object.assign(e,{isNew:false}))}));
-    if(!d.crews.length)d.crews=[{id:newId("c-"),foreman:"",jobId:"",notes:"",workers:[],equip:[]}];applyHrs();st.started=true;redraw();
-    toast("Copied "+d.crews.length+" crew"+(d.crews.length===1?"":"s")+" from "+roDay(src.date)+". Hours set to "+(d.weather?"2 ST":"8 ST + 2 OT")+".",5000);};
+    const cp=roNorm(JSON.parse(JSON.stringify(src)));const clean=w=>w?Object.assign(w,{isNew:false}):null;
+    d.gf=clean(cp.gf)||d.gf;d.foreman=clean(cp.foreman);
+    d.crews=(cp.crews||[]).map(c=>Object.assign(c,{id:newId("c-"),lead:clean(c.lead),workers:(c.workers||[]).map(clean),equip:(c.equip||[]).map(e=>Object.assign(e,{isNew:false}))}));
+    if(!d.crews.length)d.crews=[roNewCrew()];applyHrs();st.started=true;redraw();
+    toast("Copied from "+roDay(src.date)+": "+d.crews.length+" crew"+(d.crews.length===1?"":"s")+". Hours set to "+(d.weather?"2 ST":"8 ST + 2 OT")+".",5000);};
   const del=document.getElementById("ro-del");if(del)del.onclick=()=>{const pay=(S.index.rosterPay||{})[d.gfKey+"|"+weekMon(d.date)];
     confirmBox("Delete the roster for "+roDay(d.date)+"?",(pay?"The pay sheet already published for this week won't change until you republish it. ":"")+"This can't be undone.","Delete",async()=>{if(!canSave())return;
       await commitIndex(ix=>{delete ix.docs[st.id];},"Workflow: roster deleted");S.docs.delete(st.id);S.rEdit=null;toast("Roster deleted");location.hash=back.slice(1);},{danger:true});};
   document.getElementById("ro-save").onclick=async e=>{const err=document.getElementById("ro-err");err.textContent="";const b=e.target;
     try{const out=roValidate(d);if(!canSave())return;b.disabled=true;b.textContent="Saving…";
-      const newPeople=[],newUnits=[];d.crews.forEach(c=>{c.workers.forEach(w=>{if(w.isNew)newPeople.push({name:w.name,role:w.role});delete w.isNew;});c.equip.forEach(x=>{if(x.isNew)newUnits.push({desc:x.desc,unitNo:x.unitNo,items:x.items});delete x.isNew;});});
+      const newPeople=[],newUnits=[];roPeople(d).forEach(w=>{if(w.isNew)newPeople.push({name:w.name,role:w.role});delete w.isNew;});d.crews.forEach(c=>c.equip.forEach(x=>{if(x.isNew)newUnits.push({desc:x.desc,unitNo:x.unitNo,items:x.items});delete x.isNew;}));
       if(newPeople.length||newUnits.length)await commitIndex(ix=>{ix.roster=ix.roster||[];newPeople.forEach(p=>{if(!ix.roster.some(x=>x.name.toLowerCase()===p.name.toLowerCase()))ix.roster.push({id:newId("w-"),name:p.name,role:p.role,addedBy:S.me.name,addedAt:new Date().toISOString()});});
         ix.equipUnits=ix.equipUnits||[];newUnits.forEach(u=>{if(!ix.equipUnits.some(x=>teNorm(x.desc)===teNorm(u.desc)&&String(x.unitNo)===String(u.unitNo)))ix.equipUnits.push({id:newId("u-"),desc:u.desc,unitNo:u.unitNo,items:u.items,addedBy:S.me.name,addedAt:new Date().toISOString()});});},"Workflow: roster people and equipment");
       const hist=(d.weather?"Inclement Weather Day · ":"")+"Roster saved: "+out;
-      if(st.id){const ok=await commitDoc(st.id,x=>{x.crews=d.crews;x.notes=d.notes||"";x.weather=!!d.weather;},hist);if(!ok){b.disabled=false;b.textContent="Save roster";return;}}
+      if(st.id){const ok=await commitDoc(st.id,x=>{x.gf=d.gf;x.foreman=d.foreman;x.crews=d.crews;x.notes=d.notes||"";x.weather=!!d.weather;},hist);if(!ok){b.disabled=false;b.textContent="Save roster";return;}}
       else{if(roOf(d.gfKey,d.date))throw new Error("A roster for "+roDay(d.date)+" was just saved by someone else. Reload and open it.");
-        const doc={date:d.date,gfKey:d.gfKey,gfName:d.gfName,crews:d.crews,notes:d.notes||"",weather:!!d.weather};const id=await createDoc("roster",doc,hist);if(!id){b.disabled=false;b.textContent="Save roster";return;}}
+        const doc={date:d.date,gfKey:d.gfKey,gfName:d.gfName,gf:d.gf,foreman:d.foreman,crews:d.crews,notes:d.notes||"",weather:!!d.weather};const id=await createDoc("roster",doc,hist);if(!id){b.disabled=false;b.textContent="Save roster";return;}}
       S.rEdit=null;toast("Roster saved for "+roDay(d.date),4000);location.hash=back.slice(1);}
     catch(x){err.textContent=x.message||String(x);b.disabled=false;b.textContent="Save roster";}};}
-function roValidate(d){
+function roValidate(d){roNorm(d);
   if(!d.crews.length)throw new Error("Add a crew.");const seen=new Map();let ppl=0,hrs=0;
-  d.crews.forEach((c,ci)=>{const n="Crew "+(ci+1);if(!c.workers.length)throw new Error(n+": add the workers (or remove the crew).");
-    c.workers.forEach(w=>{const k=w.name.toLowerCase();if(seen.has(k))throw new Error(w.name+" is on "+seen.get(k)+" and "+n+". Put each person on one crew per day.");seen.set(k,n);
-      if(!w.role)throw new Error(n+": pick a classification for "+w.name+".");
-      ["st","ot","dt"].forEach(h=>{const v=w[h];if(v!==""&&v!=null&&(!isFinite(Number(v))||Number(v)<0))throw new Error(n+": "+w.name+" "+h.toUpperCase()+" hours aren't a number.");});
-      const t=roNum(w.st)+roNum(w.ot)+roNum(w.dt);if(t>24)throw new Error(n+": "+w.name+" has "+fmtN(t)+" hours. A day can't be more than 24.");ppl++;hrs+=t;
-      w.st=roNum(w.st);w.ot=roNum(w.ot);w.dt=roNum(w.dt);});
-    if(c.foreman&&!c.workers.some(w=>w.name===c.foreman))c.foreman="";
+  if(!d.gf||!d.gf.name)throw new Error("Pick the General Foreman at the top.");
+  if(!d.foreman||!d.foreman.name)throw new Error("Pick the Foreman who oversees the crews.");
+  const check=(w,where)=>{const k=w.name.toLowerCase();if(seen.has(k))throw new Error(w.name+" is listed as "+seen.get(k)+" and "+where+". Put each person on the roster once per day.");seen.set(k,where);
+    if(!w.role)throw new Error(where+": pick a classification for "+w.name+".");
+    ["st","ot","dt"].forEach(h=>{const v=w[h];if(v!==""&&v!=null&&(!isFinite(Number(v))||Number(v)<0))throw new Error(where+": "+w.name+" "+h.toUpperCase()+" hours aren't a number.");});
+    const t=roNum(w.st)+roNum(w.ot)+roNum(w.dt);if(t>24)throw new Error(where+": "+w.name+" has "+fmtN(t)+" hours. A day can't be more than 24.");ppl++;hrs+=t;
+    w.st=roNum(w.st);w.ot=roNum(w.ot);w.dt=roNum(w.dt);};
+  check(d.gf,"General Foreman");check(d.foreman,"Foreman");
+  d.crews.forEach((c,ci)=>{const n="Crew "+(ci+1);if(!c.lead||!c.lead.name)throw new Error(n+": pick the Lead Lineman.");check(c.lead,n+" Lead Lineman");
+    c.workers.forEach(w=>check(w,n));
     c.equip.forEach(e=>{const v=Number(e.h);if(!isFinite(v)||v<0||v>24)throw new Error(n+": "+e.desc+" hours must be 0–24.");e.h=v;
       if(c.jobId&&!(e.items||[]).length)throw new Error(n+": "+e.desc+(e.unitNo?" #"+e.unitNo:"")+" needs a rate item for T&E billing. Remove it and add it again with a rate item.");});});
   return d.crews.length+" crew(s) · "+ppl+" people · "+fmtN(hrs)+" labor hrs";}
 
-function roPickWorkers(st,ci,done){const d=st.doc;const on=new Set(d.crews.flatMap(c=>c.workers.map(w=>w.name.toLowerCase())));
+function roPickWorkers(st,ci,done){const d=st.doc;const on=new Set(roPeople(d).map(w=>w.name.toLowerCase()));
   const list=roster().filter(p=>!on.has(p.name.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name));
-  const m=modal("Add workers — crew "+(ci+1),'<input type="search" id="rw-q" placeholder="Search names…" aria-label="Search workers" style="width:100%;padding:8px 10px;border:1px solid var(--field);border-radius:6px">'+
+  const m=modal("Add crew members — crew "+(ci+1),'<input type="search" id="rw-q" placeholder="Search names…" aria-label="Search workers" style="width:100%;padding:8px 10px;border:1px solid var(--field);border-radius:6px">'+
     '<div class="ulist" id="rw-list" style="max-height:42vh;overflow:auto;margin-top:8px">'+(list.length?list.map(p=>'<label class="u" style="grid-template-columns:auto 1fr;cursor:pointer" data-hay="'+esc(p.name.toLowerCase())+'"><input type="checkbox" data-pid="'+esc(p.id)+'"><span><b>'+esc(p.name)+'</b> <span class="sub">'+esc(p.role||"No classification")+"</span></span></label>").join(""):'<p class="sub">Everyone on the company roster is already on this roster.</p>')+"</div>"+
     '<details style="margin-top:10px"><summary>Someone new (not on the list)</summary><div class="row-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px"><label class="f" style="flex:1 1 180px">Name<input id="rw-nn"></label><label class="f" style="flex:1 1 200px">Classification'+roleSelect("",undefined,' id="rw-nr"')+'</label></div><p class="sub" style="margin:4px 0 0">They are added to the company roster when you save.</p></details>'+
     '<p class="sub" style="margin:8px 0 0">Hours start at 8 ST + 2 OT. Change them on the roster.</p>',
@@ -180,7 +212,7 @@ function roPickWorkers(st,ci,done){const d=st.doc;const on=new Set(d.crews.flatM
     if(nn){if(!nr){msg.textContent="Pick a classification for "+nn+".";return;}if(on.has(nn.toLowerCase())||add.some(a=>a.name.toLowerCase()===nn.toLowerCase())){msg.textContent=nn+" is already on this roster.";return;}
       const ex=((S.index&&S.index.roster)||[]).find(p=>p.name.toLowerCase()===nn.toLowerCase());const D2=roDef(d);add.push(ex?{pid:ex.id,name:ex.name,role:nr,st:D2.st,ot:D2.ot,dt:D2.dt}:{pid:"",name:nn,role:nr,st:D2.st,ot:D2.ot,dt:D2.dt,isNew:true});}
     if(!add.length){msg.textContent="Tick at least one person, or enter someone new.";return;}
-    c.workers.push(...add);if(!c.foreman){const f=c.workers.find(w=>/^Foreman$/i.test(w.role))||c.workers.find(w=>/Foreman/i.test(w.role));if(f)c.foreman=f.name;}
+    c.workers.push(...add);
     closeOverlay();done();};}
 
 function roPickEquip(st,ci,done){const d=st.doc;const on=new Set(d.crews.flatMap(c=>c.equip.map(e=>teNorm(e.desc)+"#"+String(e.unitNo||"").trim())));
@@ -217,9 +249,10 @@ function renderRosters(){
   main.innerHTML='<section class="jobhead"><div><h1>Daily rosters</h1><div class="meta"><span>Crews, workers, equipment and hours entered by each General Foreman</span></div></div></section>'+
     '<div class="filters"><button class="btn sm" type="button" data-d="-1" aria-label="Previous day">‹</button><input type="date" id="rs-day" value="'+esc(day)+'" aria-label="Day"><button class="btn sm" type="button" data-d="1" aria-label="Next day">›</button>'+(day!==todayStr()?'<button class="btn sm" type="button" data-d="0">Today</button>':"")+'<span class="count"><b>'+esc(roDay(day))+"</b> · "+list.length+" roster"+(list.length===1?"":"s")+" · "+tot.crews+" crews · "+tot.people+" people · "+tot.equip+" equipment · "+fmtN(tot.hrs)+" labor hrs</span></div>"+
     (list.length?list.map(r=>'<section class="ro-crew"><div class="ro-ch"><h2 class="sec" style="margin:0">'+esc(r.gfName)+(r.weather?" "+wxChip:"")+'</h2><button class="btn sm" type="button" data-open="'+esc(r.id)+'">'+(canRoEdit(r.gfKey)?"Open / edit":"Open")+"</button></div>"+
+      (roNorm(r),"")+'<p style="margin:0 0 6px"><b>General Foreman:</b> '+esc((r.gf||{}).name||"—")+(r.gf?' <span class="sub">('+fmtN(r.gf.st)+" ST / "+fmtN(r.gf.ot)+" OT / "+fmtN(r.gf.dt)+" DT)</span>":"")+' &nbsp; <b>Foreman:</b> '+esc((r.foreman||{}).name||"—")+(r.foreman?' <span class="sub">('+fmtN(r.foreman.st)+" ST / "+fmtN(r.foreman.ot)+" OT / "+fmtN(r.foreman.dt)+" DT)</span>":"")+"</p>"+
       (r.crews||[]).map((c,ci)=>{const j=c.jobId?jobById(c.jobId):null;
-        return'<h3 class="pv-h3">Crew '+(ci+1)+(c.foreman?" — Foreman "+esc(c.foreman):"")+(j?' · <span class="chip c-sch">'+esc(j.name)+" (T&amp;E)</span>":"")+"</h3>"+(c.notes?'<p class="sub" style="margin:0 0 6px">'+esc(c.notes)+"</p>":"")+
-          '<div class="ro-two"><div class="tablebox"><table class="static"><thead><tr><th>Worker</th><th>Classification</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th></tr></thead><tbody>'+(c.workers||[]).map(w=>"<tr><td><b>"+esc(w.name)+"</b></td><td>"+esc(w.role)+'</td><td class="mono num">'+fmtN(w.st)+'</td><td class="mono num">'+fmtN(w.ot)+'</td><td class="mono num">'+fmtN(w.dt)+"</td></tr>").join("")+"</tbody></table></div>"+
+        return'<h3 class="pv-h3">Crew '+(ci+1)+(c.lead?" — Lead Lineman "+esc(c.lead.name):"")+(j?' · <span class="chip c-sch">'+esc(j.name)+" (T&amp;E)</span>":"")+"</h3>"+(c.notes?'<p class="sub" style="margin:0 0 6px">'+esc(c.notes)+"</p>":"")+
+          '<div class="ro-two"><div class="tablebox"><table class="static"><thead><tr><th>Worker</th><th>Classification</th><th class="num">ST</th><th class="num">OT</th><th class="num">DT</th></tr></thead><tbody>'+(c.lead?[Object.assign({lead:1},c.lead)]:[]).concat(c.workers||[]).map(w=>"<tr><td><b>"+esc(w.name)+"</b></td><td>"+esc(w.role)+'</td><td class="mono num">'+fmtN(w.st)+'</td><td class="mono num">'+fmtN(w.ot)+'</td><td class="mono num">'+fmtN(w.dt)+"</td></tr>").join("")+"</tbody></table></div>"+
           '<div class="tablebox"><table class="static"><thead><tr><th>Equipment</th><th>Unit #</th><th class="num">Hours</th></tr></thead><tbody>'+((c.equip||[]).map(e=>"<tr><td>"+esc(e.desc)+'</td><td class="mono">'+esc(e.unitNo||"")+'</td><td class="mono num">'+fmtN(e.h)+"</td></tr>").join("")||'<tr><td colspan="3" class="sub">No equipment</td></tr>')+"</tbody></table></div></div>";}).join("")+"</section>").join("")
       :'<div class="empty"><b>No rosters for '+esc(roDay(day))+"</b>General Foremen create them from their home screen.</div>")+
     '<h2 class="sec">Week by General Foreman</h2><div id="rs-wk"></div>';

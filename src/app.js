@@ -1378,5 +1378,5 @@ function printInvoice(i){
 }
 
 initLogin();
-window.__wf={S,priceSheet,buildInvoice,priceTe,sheets};
+window.__wf={S,priceSheet,buildInvoice,priceTe,sheets,roCounts,roAggregate,roWeekDays,rosters};
 })();
