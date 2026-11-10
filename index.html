@@ -1420,9 +1420,12 @@ function compCell(j,p){const ok=canShutdown(j);const v=p.completed||"";
   return ok?'<input type="date" class="cp-in" data-cp="'+esc(p.id)+'" value="'+esc(v)+'" max="'+todayStr()+'" aria-label="Completed date" title="'+(v&&p.completedBy?"Set by "+esc(p.completedBy):"Date the location was completed")+'">':(v?esc(fmtD(v)):'<span class="sub">—</span>');}
 /* work status: Not started / Started / Complete — the field's view of a location, separate from the CM and billing status */
 function workSt(j,p,sh){sh=sh||sheets().filter(s=>s.jobId===j.id&&s.poleId===p.id);const te=isTeJob(j);
-  if(te?p.teDone:(p.completed||sh.some(s=>s.status!==ST.STA)))return{k:"done",lab:"Complete",chip:"c-done",sub:te?(p.teDone?fmtD(p.teDone.at):""):(p.completed?fmtD(p.completed):"Sheet submitted")};
+  /* a status set by hand wins until something newer happens (a sheet sent to the CM, a completed date or the T&E Complete box) */
+  const ev=[p.completedAt||(p.completed?p.completed+"T23:59:59Z":""),p.teDone&&p.teDone.at||""].concat(sh.filter(s=>s.status!==ST.STA).map(s=>s.submittedAt||s.createdAt||"")).filter(Boolean).sort().pop()||"";
+  const man=p.work&&p.work.st&&(!ev||String(p.work.at)>=ev);
+  if(!man&&(te?p.teDone:(p.completed||sh.some(s=>s.status!==ST.STA))))return{k:"done",lab:"Complete",chip:"c-done",sub:te?(p.teDone?fmtD(p.teDone.at):""):(p.completed?fmtD(p.completed):"Sheet submitted")};
   const sta=sh.filter(s=>s.status===ST.STA);const psd=sta.map(s=>s.poleSetDate).filter(Boolean).sort()[0]||"";
-  if(p.work&&p.work.st)return p.work.st==="started"?{k:"started",lab:"Started",chip:"c-req",sub:psd?"Pole set "+fmtD(psd):"Set by "+p.work.by,manual:true}:{k:"none",lab:"Not started",chip:"c-stage",sub:"Set by "+p.work.by,manual:true};
+  if(man)return p.work.st==="started"?{k:"started",lab:"Started",chip:"c-req",sub:psd?"Pole set "+fmtD(psd):"Set by "+p.work.by,manual:true}:{k:"none",lab:"Not started",chip:"c-stage",sub:"Set by "+p.work.by,manual:true};
   if(sta.length)return{k:"started",lab:"Started",chip:"c-req",sub:psd?"Pole set "+fmtD(psd):sta.length+" saved sheet"+(sta.length===1?"":"s")};
   return{k:"none",lab:"Not started",chip:"c-stage",sub:""};}
 function workCell(j,p,sh){const w=workSt(j,p,sh);const ed=canShutdown(j)&&!j.archived;
