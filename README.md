@@ -1,4 +1,4 @@
-# P&G Power Co. — Unit Workflow
+# Linewise — P&G Power Co.
 
 General Foreman unit sheets → Construction Manager sign-off → billing → invoice, built around the Eversource MASTER Unit Invoice Template.
 
