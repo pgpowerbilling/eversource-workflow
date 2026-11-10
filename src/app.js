@@ -1,12 +1,12 @@
 (function(){
 "use strict";
 /* ---------- constants ---------- */
-const ST={SUB:"submitted",RET:"returned",GF:"gf_approved",OK:"approved",INV:"invoiced"};
-const ST_LABEL={submitted:"Awaiting CM signature",returned:"Returned to field",gf_approved:"Ready to bill",approved:"Ready to bill",invoiced:"Invoiced"};
+const ST={STA:"started",SUB:"submitted",RET:"returned",GF:"gf_approved",OK:"approved",INV:"invoiced"};
+const ST_LABEL={started:"Started — not complete",submitted:"Awaiting CM signature",returned:"Returned to field",gf_approved:"Ready to bill",approved:"Ready to bill",invoiced:"Invoiced"};
 /* GF signature moves a sheet straight to Ready to bill; gf_approved is kept only for sheets approved under the old two-step flow */
 const isReady=d=>d.status===ST.OK||d.status===ST.GF;
-const ST_CHIP={submitted:"c-sch",returned:"c-bad",gf_approved:"c-done",approved:"c-done",invoiced:"c-stage"};
-const ST_ORDER=[ST.SUB,ST.RET,ST.GF,ST.OK,ST.INV];
+const ST_CHIP={started:"c-req",submitted:"c-sch",returned:"c-bad",gf_approved:"c-done",approved:"c-done",invoiced:"c-stage"};
+const ST_ORDER=[ST.SUB,ST.RET,ST.STA,ST.GF,ST.OK,ST.INV];
 const ROLES={admin:"Admin",approver:"Billing approver",gf:"Construction Manager",crew:"General Foreman",viewer:"Viewer"};
 /* internal role keys are unchanged so existing logins keep working: crew = General Foreman (fills out sheets), gf = Construction Manager (signs off) */
 const ROLE_HELP={admin:"Admin — everything, incl. logins, jobs, billing and invoicing",approver:"Billing approver — final approval, invoices",gf:"Construction Manager — review and sign off unit sheets",crew:"General Foreman — fill out and submit unit sheets",viewer:"Viewer — read only"};
@@ -88,7 +88,7 @@ const hasToken=()=>!!(S.index&&S.index.ghToken);
 const W=()=>!!S.me&&role()!=="viewer";
 const can={
   newSheet:()=>W()&&["admin","gf","crew"].includes(role()),
-  editSheet:d=>W()&&d.status!==ST.INV&&(isAdmin()||(role()==="approver"&&isReady(d))||(role()==="gf"&&[ST.SUB,ST.RET].includes(d.status))||(role()==="crew"&&d.createdByKey===S.myKey&&[ST.SUB,ST.RET].includes(d.status))),
+  editSheet:d=>W()&&d.status!==ST.INV&&(isAdmin()||(role()==="approver"&&isReady(d))||(role()==="gf"&&[ST.SUB,ST.RET].includes(d.status))||(role()==="crew"&&d.createdByKey===S.myKey&&[ST.STA,ST.SUB,ST.RET].includes(d.status))),
   gf:d=>W()&&(isAdmin()||role()==="gf")&&d.status===ST.SUB,
   bill:()=>false,
   reopen:d=>W()&&isBill()&&isReady(d),
@@ -440,20 +440,21 @@ function renderSheet(){
   const j=jobById(d.jobId);const p=poleById(j,d.poleId);const id=S.docId;
   const acts=[];
   if(isTe(d)){if(canPaySheet(d))acts.push('<button class="btn'+(role()==="crew"?" primary":"")+'" type="button" id="a-pay">'+(d.paySheet?"Pay sheet ✓":"Publish pay sheet")+"</button>");if(d.status!==ST.INV&&(can.setup()||canGfSign()))acts.push('<button class="btn" type="button" id="a-edit">Per diem, lodging &amp; subs</button>');}
-  else if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
+  else if(can.editSheet(d))acts.push('<button class="btn" type="button" id="a-edit">'+(d.status===ST.STA?"Finish &amp; submit to CM":d.status===ST.RET&&role()==="crew"?"Fix &amp; resubmit":"Edit sheet")+"</button>");
   if(can.hold(d))acts.push('<button class="btn" type="button" id="a-hold">'+(d.hold&&d.hold.on?"Release hold":"Hold")+"</button>");
   if(can.gf(d))acts.push('<button class="btn danger" type="button" id="a-gfret">Return to field</button><button class="btn primary" type="button" id="a-gfok">CM sign &amp; approve</button>');
   if(can.bill(d))acts.push('<button class="btn danger" type="button" id="a-bret">Return</button><button class="btn primary" type="button" id="a-bok">Approve for invoice</button>');
   if(can.reopen(d))acts.push('<button class="btn" type="button" id="a-reopen">Send back to CM</button>');
   if(d.status===ST.INV&&d.invoiceId&&can.seeInvoices())acts.push('<a class="btn" href="#inv-'+esc(d.invoiceId)+'">Open invoice '+esc(d.invoiceNo||"")+"</a>");
   const ret=d.status===ST.RET&&d.returnNote?'<div class="banner bad"><b>Returned by '+esc(d.returnedBy||"")+":</b> "+esc(d.returnNote)+"</div>":"";
+  const staB=d.status===ST.STA?'<div class="banner"><b>Started — not complete.</b> Saved by '+esc(d.createdBy||"")+(d.poleSetDate?" · pole set "+esc(fmtD(d.poleSetDate)):"")+'. It has not gone to the CM and won\'t be billed. When the location is finished, use \u201cFinish &amp; submit to CM\u201d to add the remaining units and send it.</div>':"";
   const hold=d.hold&&d.hold.on?'<div class="banner"><b>On hold — '+esc(d.hold.by)+":</b> "+esc(d.hold.note)+"</div>":"";
-  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← Overview</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+hold+
+  main.innerHTML=(role()==="crew"?'<a class="back" href="#sheets">← Overview</a>':j?'<a class="back" href="#job-'+esc(j.id)+'">← '+esc(j.name)+'</a>':'<a class="back" href="#overview">← Overview</a>')+ret+staB+hold+
     '<section class="jobhead"><div><h1>'+(isTe(d)?"T&amp;E timesheet ":"Unit sheet ")+esc(d.no)+'</h1><div class="meta">'+stChip(d)+"<span>"+esc(j?j.name:"(job removed)")+"</span><span>"+esc(fmtD(d.workDate))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
-    '<section class="details">'+(isTe(d)?teDetailsHtml(d)+"</section>"+teBodyHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d):dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+
+    '<section class="details">'+(isTe(d)?teDetailsHtml(d)+"</section>"+teBodyHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d):dl("Date",d.workDate?esc(fmtD(d.workDate)):'<span class="chip c-req">Not filled in yet</span>')+dl("Crew / lead",String(d.crew||"").trim()?esc(d.crew):'<span class="chip c-req">Not filled in yet</span>')+dl("AWC",esc(d.awc))+dl("Work order #",esc(d.wo))+dl("FWO #",esc(d.fwo))+dl("Pole set?",esc(d.poleSet==="yes"?"Yes":d.poleSet==="no"?"No":""))+(d.poleSetDate?dl("Pole set date",esc(fmtD(d.poleSetDate))):"")+
       dl("Pole # / location",esc(p?p.esPole+" — "+p.street+", "+p.town:(d.poleText?d.poleText+" (not on packet list)":"")),true)+
       (p?dl("Ticket ID",esc(p.ticket))+dl("VZ pole #",esc(p.vzPole))+dl("Pricing area",esc(poleArea(j,p))||'<span class="late">Not set</span>'):"")+
-      dl("Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(d.billAt?dl("Billing approval",esc(d.billBy+" · "+fmtT(d.billAt))):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
+      dl(d.status===ST.STA?"Saved (started)":"Submitted",esc(d.createdBy+" · "+fmtT(d.submittedAt||d.createdAt)))+dl("CM signature",d.gfAt?'<span class="sig">✔ Approved by '+esc(d.gfBy)+"</span> · "+esc(fmtT(d.gfAt)):"")+(d.billAt?dl("Billing approval",esc(d.billBy+" · "+fmtT(d.billAt))):"")+(can.seeInvoices()?dl("Invoice",esc(d.invoiceNo||"")):"")+
       (d.source?dl("Uploaded from",'<button class="btn sm" type="button" id="a-src">'+esc(d.source.name)+"</button> "+(/\.xls[xm]$/i.test(d.source.name)?"row ":"page ")+esc(d.source.page)):"")+(d.notes?dl("Notes / extras / difficulty justification",esc(d.notes),true):"")+(d.gfNote?dl("CM note",esc(d.gfNote),true):"")+(d.billNote?dl("Billing note",esc(d.billNote),true):"")+"</section>"+
     '<h2 class="sec">Units</h2>'+sheetLinesHtml(d)+'<h2 class="sec">Photos</h2>'+photosSectionHtml(d)+'<h2 class="sec">History</h2>'+histHtml(d));
   fillPhotoImgs(main);main.querySelectorAll("[data-open-photo]").forEach(a=>a.onclick=ev=>{ev.preventDefault();openPhoto(d,a.dataset.openPhoto);});
@@ -474,7 +475,7 @@ function renderSheet(){
 /* ---------- before / after photos (encrypted, stored in data/files) ---------- */
 const PHOTO_MAX_SIDE=1280,PHOTO_Q=0.72,PHOTO_KINDS=[["before","Before"],["after","After"]];
 const photoCache=new Map();
-const needPhotos=()=>role()==="crew";
+const needPhotos=()=>false;  /* photo slots stay on the sheets; not required to submit for now */
 async function decodeImage(file){
   try{return await createImageBitmap(file,{imageOrientation:"from-image"});}catch(e){}
   return await new Promise((res,rej)=>{const u=URL.createObjectURL(file);const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error("That photo couldn't be opened. Use a JPEG or PNG photo."));im.src=u;});}
@@ -498,7 +499,7 @@ function fillPhotoImgs(root){root.querySelectorAll("img[data-photo]").forEach(as
 const photoBadges=d=>PHOTO_KINDS.map(([k,l])=>d.photos&&d.photos[k]?'<span class="chip c-done">'+l+" ✓</span>":'<span class="chip c-bad">No '+l.toLowerCase()+"</span>").join(" ");
 /* form slots: slots = {before:{meta,blob,url}, after:{…}} */
 function photoSlotsHtml(pre,req){
-  return'<div class="ph-grid">'+PHOTO_KINDS.map(([k,l])=>'<div class="ph-slot" data-kind="'+k+'"><div class="ph-h"><b>'+l+' photo</b>'+(req?' <span class="sub">required</span>':"")+'</div><div class="ph-frame"><img alt="'+l+' photo" hidden><span class="ph-empty">No '+l.toLowerCase()+' photo yet</span></div>'+
+  return'<div class="ph-grid">'+PHOTO_KINDS.map(([k,l])=>'<div class="ph-slot" data-kind="'+k+'"><div class="ph-h"><b>'+l+' photo</b>'+(req?' <span class="sub">required</span>':' <span class="sub">optional</span>')+'</div><div class="ph-frame"><img alt="'+l+' photo" hidden><span class="ph-empty">No '+l.toLowerCase()+' photo yet</span></div>'+
     '<div class="row-inline"><label class="btn sm primary" style="cursor:pointer">Take photo<input type="file" accept="image/*" capture="environment" data-ph="'+k+'" hidden></label><label class="btn sm" style="cursor:pointer">From photos<input type="file" accept="image/*" data-ph="'+k+'" hidden></label><span class="sub" data-phst="'+k+'"></span></div></div>').join("")+"</div>";}
 function bindPhotoSlots(root,slots){
   const show=k=>{const s=slots[k],box=root.querySelector('.ph-slot[data-kind="'+k+'"]');const img=box.querySelector("img"),em=box.querySelector(".ph-empty");
@@ -523,8 +524,8 @@ function openSheetForm(id,presetJob,only){
   if(id==null&&!can.newSheet()){canSave();return;}
   const src=id?S.docs.get(id):null;
   if(src&&isTe(src))return;if(!id&&presetJob&&isTeJob(jobById(presetJob))){toast("T&E jobs use the weekly timesheet upload on the job page.",6000);return;}
-  const d=src?JSON.parse(JSON.stringify(src)):{jobId:"",poleId:"",poleText:"",workDate:todayStr(),crew:(S.me&&S.me.crew)||(role()==="crew"?S.me.name:""),awc:"",wo:"",fwo:"",poleSet:"",notes:"",lines:[]};
-  if(!id&&presetJob)d.jobId=presetJob;
+  const d=src?JSON.parse(JSON.stringify(src)):{jobId:"",poleId:"",poleText:"",workDate:todayStr(),crew:(S.me&&S.me.crew)||(role()==="crew"?S.me.name:""),awc:"",wo:"",fwo:"",poleSet:"",poleSetDate:"",notes:"",lines:[]};
+  if(!id&&presetJob)d.jobId=presetJob;const pick=!id||d.status===ST.STA;
   const act=jobs().filter(j=>!isTeJob(j)&&(!j.archived||j.id===d.jobId));
   if(!act.length){toast(can.setup()?"Add a job first (Add Job).":"No jobs are set up yet. Ask billing to add the job.",7000);return;}
   if(!d.jobId&&act.length===1)d.jobId=act[0].id;
@@ -532,13 +533,15 @@ function openSheetForm(id,presetJob,only){
   const others=(d.lines||[]).filter(l=>!CREW_KEYS.has(l.key)).map(l=>({key:l.key,qty:l.qty,note:l.note||""}));
   const otherUnits=(rates()?rates().units:[]).filter(u=>!CREW_KEYS.has(u.key));
   const sec=CREW_SECTIONS.map(s=>'<div class="cl-sec"><div class="cl-h"><span>'+esc(s[0])+'</span><span>Qty</span></div>'+s[1].map(it=>'<label class="cl-row"><span>'+esc(it[1])+(it[0]===CK&&can.seePrice()?' <span class="sub">(no rate on file)</span>':"")+'</span><input type="number" inputmode="decimal" step="any" min="0" data-q="'+esc(it[0])+'" value="'+esc(qty[it[0]]==null?"":qty[it[0]])+'" aria-label="'+esc(s[0]+" — "+it[1])+' quantity"></label>').join("")+"</div>").join("");
-  const body='<fieldset><legend>Sheet header</legend>'+
+  const body=(pick?'<fieldset class="sf-done"><legend>Is this location complete?</legend><label class="chk"><input type="radio" name="sf-done" value="yes"'+(id?"":" checked")+'> <b>Complete</b> — submit to the CM</label><label class="chk"><input type="radio" name="sf-done" value="no"'+(id?" checked":"")+'> <b>Not complete</b> — save as Started. The pole may be set and some units done; it is not sent to the CM or billed until you finish it.</label></fieldset>':"")+
+    '<fieldset><legend>Sheet header</legend>'+
     '<label class="f" for="sf-date">Date<input type="date" id="sf-date" value="'+esc(d.workDate)+'"></label>'+
     '<label class="f" for="sf-crew">Crew / lead<input id="sf-crew" value="'+esc(d.crew)+'"></label>'+
     '<label class="f" for="sf-awc">AWC<input id="sf-awc" value="'+esc(d.awc)+'"></label>'+
     '<label class="f" for="sf-wo">Work order #<input id="sf-wo" value="'+esc(d.wo)+'"></label>'+
     '<label class="f" for="sf-fwo">FWO #<input id="sf-fwo" value="'+esc(d.fwo)+'"></label>'+
     '<label class="f" for="sf-set">Pole set?<select id="sf-set"><option value="">—</option><option value="yes"'+(d.poleSet==="yes"?" selected":"")+'>Yes</option><option value="no"'+(d.poleSet==="no"?" selected":"")+">No</option></select></label>"+
+    '<label class="f" for="sf-psd">Date pole set<input type="date" id="sf-psd" value="'+esc(d.poleSetDate||"")+'" max="'+todayStr()+'"></label>'+
     '<label class="f wide" for="sf-job">Job<select id="sf-job"><option value="">Select a job…</option>'+act.map(j=>'<option value="'+esc(j.id)+'"'+(j.id===d.jobId?" selected":"")+">"+esc(j.name)+"</option>").join("")+"</select></label>"+
     '<label class="f wide" for="sf-pq">Pole # / location — search street, pole # or ticket<input id="sf-pq" type="search" autocomplete="off" placeholder="e.g. Bent St, P43, PT4382921"></label>'+
     '<div class="wide polepick" id="sf-poles" role="listbox" aria-label="Poles on the packet"></div>'+
@@ -547,7 +550,10 @@ function openSheetForm(id,presetJob,only){
     '<div><div class="sec-h">Other units</div><div id="sf-other" class="linelist"></div><button class="btn" type="button" id="sf-add-o" style="margin-top:8px">+ Add another unit</button></div>'+
     '<div><div class="sec-h">Photos of the location</div>'+photoSlotsHtml("sf",needPhotos())+"</div>"+
     '<label class="f wide" for="sf-notes">Notes / extras / difficulty justification<textarea id="sf-notes">'+esc(d.notes)+"</textarea></label>";
-  const m=modal(id?"Edit "+d.no:"Daily unit sheet",body,'<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="sf-save">'+(id?(d.status===ST.RET?"Save &amp; resubmit":"Save changes"):"Submit to CM")+"</button>","wide");
+  const m=modal(id?"Edit "+d.no:"Daily unit sheet",body,'<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="sf-save">'+(pick?(id?"Save":"Save"):(d.status===ST.RET?"Save &amp; resubmit":"Save changes"))+"</button>","wide");
+  const doneV=()=>{const r=m.querySelector('input[name="sf-done"]:checked');return!r||r.value==="yes";};
+  const sbtn=m.querySelector("#sf-save");const lab=()=>{if(pick)sbtn.textContent=doneV()?"Submit to CM":"Save as Started";};lab();m.querySelectorAll('input[name="sf-done"]').forEach(r=>r.onchange=lab);
+  const psd=m.querySelector("#sf-psd"),pset=m.querySelector("#sf-set");psd.onchange=()=>{if(psd.value)pset.value="yes";};
   const slots={before:{meta:d.photos&&d.photos.before||null},after:{meta:d.photos&&d.photos.after||null}};bindPhotoSlots(m,slots);
   const pq=m.querySelector("#sf-pq"),pbox=m.querySelector("#sf-poles"),jsel=m.querySelector("#sf-job");
   let selPole=d.poleId,notOnList=!d.poleId&&!!d.poleText;
@@ -569,26 +575,32 @@ function openSheetForm(id,presetJob,only){
   m.querySelector("#sf-add-o").onclick=()=>{if(!otherUnits.length){toast("The rate list hasn't been loaded yet.");return;}others.push({key:"",qty:"",note:""});drawOthers();};
   m.querySelector("#sf-save").onclick=e=>busyRun(e.target,m,async()=>{
     const g=s=>m.querySelector(s).value.trim();
-    const patch={jobId:jsel.value,workDate:g("#sf-date"),crew:g("#sf-crew"),awc:g("#sf-awc"),wo:g("#sf-wo"),fwo:g("#sf-fwo"),poleSet:g("#sf-set"),notes:m.querySelector("#sf-notes").value.trim(),poleId:notOnList?"":selPole,poleText:notOnList?g("#sf-ptxt"):""};
+    const patch={jobId:jsel.value,workDate:g("#sf-date"),crew:g("#sf-crew"),awc:g("#sf-awc"),wo:g("#sf-wo"),fwo:g("#sf-fwo"),poleSet:g("#sf-set"),poleSetDate:g("#sf-psd"),notes:m.querySelector("#sf-notes").value.trim(),poleId:notOnList?"":selPole,poleText:notOnList?g("#sf-ptxt"):""};
     if(!patch.jobId)throw new Error("Pick the job.");if(!patch.crew)throw new Error("Enter the crew / lead.");
     if(!patch.poleId&&!patch.poleText)throw new Error(notOnList?"Describe the pole / location.":"Pick the pole from the list (or Pole not on the list).");
     const lines=[];
     for(const inp of m.querySelectorAll("[data-q]")){const v=inp.value.trim();if(v==="")continue;const q=Number(v);if(!isFinite(q)||q<0)throw new Error("Quantities must be numbers of 0 or more.");if(q>0)lines.push({key:inp.dataset.q,qty:q,note:notes[inp.dataset.q]||""});}
     for(const o of others){if(!o.key&&String(o.qty).trim()==="")continue;if(!o.key)throw new Error("Pick the unit for each extra line.");const q=Number(o.qty);if(String(o.qty).trim()===""||!isFinite(q)||q<=0)throw new Error(unitInfo(o.key).item+": enter a quantity greater than 0.");
       if(lines.some(l=>l.key===o.key))throw new Error(unitInfo(o.key).item+" is entered twice.");lines.push({key:o.key,qty:q,note:String(o.note||"").trim()});}
-    if(!lines.length)throw new Error("Enter at least one unit quantity.");
+    const done=doneV();
+    if(patch.poleSetDate&&patch.poleSetDate>todayStr())throw new Error("The pole set date can't be in the future.");
+    if(patch.poleSet==="yes"&&!patch.poleSetDate&&!done)throw new Error("Enter the date the pole was set.");
+    if(!lines.length&&done)throw new Error("Enter at least one unit quantity.");
+    if(!lines.length&&!done&&patch.poleSet!=="yes")throw new Error("A started location needs the pole set (with its date) or at least one unit done so far.");
     patch.lines=lines;
     const miss=photosMissing(slots);if(needPhotos()&&miss.length)throw new Error("Add the "+miss.join(" and ")+" photo"+(miss.length>1?"s":"")+" before submitting.");
     if(!canSave())return;
     if(slots.before.blob||slots.after.blob)e.target.textContent="Uploading photos…";
     patch.photos=await savePhotos(slots);e.target.textContent="Saving…";
-    if(!id){
+    if(!id&&!done){patch.status=ST.STA;
+      const nid=await createDoc("sheet",patch,"Saved as Started (not complete)"+(patch.poleSetDate?" · pole set "+fmtD(patch.poleSetDate):"")+" · "+lines.length+" unit line(s) so far");if(nid){closeOverlay();toast("Saved as Started — not sent to the CM");location.hash="sheet-"+nid;}
+    }else if(!id){
       patch.status=ST.SUB;patch.submittedAt=new Date().toISOString();
       const nid=await createDoc("sheet",patch,"Submitted "+lines.length+" unit line(s)"+(patch.photos.before||patch.photos.after?" with "+[patch.photos.before?"before":"",patch.photos.after?"after":""].filter(Boolean).join(" and ")+" photo":""));if(nid){closeOverlay();toast("Sheet submitted to the CM");location.hash="sheet-"+nid;}
     }else{
-      const ch=diffLines(src.lines,lines);const resub=src.status===ST.RET;
-      const ok=await commitDoc(id,x=>{if(x.status===ST.INV)throw new Error("This sheet is already invoiced.");Object.assign(x,patch);if(x.status===ST.RET){x.status=ST.SUB;x.submittedAt=new Date().toISOString();}},(resub?"Fixed and resubmitted. ":"Edited. ")+(ch||"No unit changes.")+(slots.before.blob||slots.after.blob?" Photo"+(slots.before.blob&&slots.after.blob?"s":"")+" updated: "+[slots.before.blob?"before":"",slots.after.blob?"after":""].filter(Boolean).join(", ")+".":""));
-      if(ok){closeOverlay();toast(resub?"Resubmitted to the CM":"Saved");}
+      const ch=diffLines(src.lines,lines);const resub=src.status===ST.RET;const fin=src.status===ST.STA&&done;
+      const ok=await commitDoc(id,x=>{if(x.status===ST.INV)throw new Error("This sheet is already invoiced.");Object.assign(x,patch);if(x.status===ST.RET||(x.status===ST.STA&&done)){x.status=ST.SUB;x.submittedAt=new Date().toISOString();}},(fin?"Location complete — submitted to the CM. ":src.status===ST.STA?"Started sheet updated. ":resub?"Fixed and resubmitted. ":"Edited. ")+(ch||"No unit changes.")+(slots.before.blob||slots.after.blob?" Photo"+(slots.before.blob&&slots.after.blob?"s":"")+" updated: "+[slots.before.blob?"before":"",slots.after.blob?"after":""].filter(Boolean).join(", ")+".":""));
+      if(ok){closeOverlay();toast(fin?"Submitted to the CM":resub?"Resubmitted to the CM":"Saved");}
     }
   });
 }
@@ -679,6 +691,36 @@ function shutCell(j,p){const on=sdOn(p);const ok=canShutdown(j);const d=on?p.shu
 /* ---------- completed date per location (unit jobs) ---------- */
 function compCell(j,p){const ok=canShutdown(j);const v=p.completed||"";
   return ok?'<input type="date" class="cp-in" data-cp="'+esc(p.id)+'" value="'+esc(v)+'" max="'+todayStr()+'" aria-label="Completed date" title="'+(v&&p.completedBy?"Set by "+esc(p.completedBy):"Date the location was completed")+'">':(v?esc(fmtD(v)):'<span class="sub">—</span>');}
+/* work status: Not started / Started / Complete — the field's view of a location, separate from the CM and billing status */
+function workSt(j,p,sh){sh=sh||sheets().filter(s=>s.jobId===j.id&&s.poleId===p.id);const te=isTeJob(j);
+  if(te?p.teDone:(p.completed||sh.some(s=>s.status!==ST.STA)))return{k:"done",lab:"Complete",chip:"c-done",sub:te?(p.teDone?fmtD(p.teDone.at):""):(p.completed?fmtD(p.completed):"Sheet submitted")};
+  const sta=sh.filter(s=>s.status===ST.STA);const psd=sta.map(s=>s.poleSetDate).filter(Boolean).sort()[0]||"";
+  if(p.work&&p.work.st)return p.work.st==="started"?{k:"started",lab:"Started",chip:"c-req",sub:psd?"Pole set "+fmtD(psd):"Set by "+p.work.by,manual:true}:{k:"none",lab:"Not started",chip:"c-stage",sub:"Set by "+p.work.by,manual:true};
+  if(sta.length)return{k:"started",lab:"Started",chip:"c-req",sub:psd?"Pole set "+fmtD(psd):sta.length+" saved sheet"+(sta.length===1?"":"s")};
+  return{k:"none",lab:"Not started",chip:"c-stage",sub:""};}
+function workCell(j,p,sh){const w=workSt(j,p,sh);const ed=canShutdown(j)&&!j.archived;
+  return(ed?'<button type="button" class="chip '+w.chip+' ws-btn" data-ws="'+esc(p.id)+'" title="Change work status" aria-label="Work status: '+w.lab+'. Change">'+w.lab+' ▾</button>':'<span class="chip '+w.chip+'">'+w.lab+"</span>")+(w.sub?'<div class="sub" style="margin-top:2px">'+esc(w.sub)+"</div>":"");}
+function bindWork(tb,j){tb.querySelectorAll("[data-ws]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();openWorkStatus(j.id,b.dataset.ws);});}
+function openWorkStatus(jid,pid){const j=jobById(jid);const p=poleById(j,pid);if(!p)return;const te=isTeJob(j);const w=workSt(j,p);
+  const sta=sheets().filter(s=>s.jobId===j.id&&s.poleId===p.id&&s.status===ST.STA);
+  const opt=(v,l,h,on)=>'<label class="chk" style="align-items:flex-start;margin:6px 0"><input type="radio" name="ws" value="'+v+'"'+(on?" checked":"")+'> <span><b>'+l+'</b><br><span class="sub">'+h+"</span></span></label>";
+  const m=modal("Work status — #"+esc(p.n)+" "+esc(p.street),'<p class="sub" style="margin:0 0 6px">'+esc([p.ticket,p.esPole].filter(Boolean).join(" · "))+'. This is the field status only; the CM and billing status doesn\'t change.</p>'+
+    opt("auto","Automatic","Follows the unit sheets: a saved (not complete) sheet = Started; a sheet sent to the CM"+(te?"":" or a completed date")+" = Complete.",!p.work)+
+    opt("none","Not started","No work at this location yet.",p.work&&p.work.st==="none")+
+    opt("started","Started","Work has begun (e.g. pole set) but the location isn't finished.",p.work&&p.work.st==="started")+
+    (te?'<p class="sub" style="margin:8px 0 0">To mark it Complete, tick the Complete box on the location.</p>':opt("done","Complete","Location finished. Sets the completed date.",false)+'<label class="f" style="margin-left:26px;max-width:220px">Completed date<input type="date" id="ws-date" value="'+esc(p.completed||todayStr())+'" max="'+todayStr()+'"></label>')+
+    (sta.length?'<div class="banner" style="margin-top:8px">'+sta.length+' saved Started sheet'+(sta.length===1?"":"s")+" on this location: "+sta.map(s=>'<a href="#sheet-'+esc(s.id)+'">'+esc(s.no)+"</a>").join(", ")+". Open it to add the remaining units and submit it to the CM.</div>":"")+
+    '<p class="sub" style="margin:8px 0 0">Now: <b>'+esc(w.lab)+"</b>"+(w.sub?" · "+esc(w.sub):"")+"</p>",
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="ws-go">Save</button>');
+  m.querySelectorAll('a[href^="#sheet-"]').forEach(a=>a.onclick=()=>closeOverlay());
+  m.querySelector("#ws-go").onclick=e=>busyRun(e.target,m,async()=>{const r=m.querySelector('input[name="ws"]:checked');if(!r)throw new Error("Pick a status.");const v=r.value;
+    const dt=v==="done"?m.querySelector("#ws-date").value:"";if(v==="done"&&!dt)throw new Error("Enter the completed date.");if(dt>todayStr())throw new Error("The completed date can't be in the future.");
+    if(!canSave())return;const at=new Date().toISOString();
+    await commitIndex(ix=>{const pp=((ix.jobs.find(x=>x.id===jid)||{}).poles||[]).find(x=>x.id===pid);if(!pp)throw new Error("This location was removed.");
+      (pp.workLog=pp.workLog||[]).push({v,date:dt||undefined,by:S.me.name,at});
+      if(v==="auto")delete pp.work;else if(v==="done"){delete pp.work;pp.completed=dt;pp.completedBy=S.me.name;pp.completedAt=at;}
+      else{pp.work={st:v,by:S.me.name,at};if(!te&&pp.completed){delete pp.completed;delete pp.completedBy;delete pp.completedAt;}}},"Workflow: work status "+v+" · "+p.street);
+    closeOverlay();refresh();toast("Work status saved");});}
 function bindComp(tb,j){tb.querySelectorAll("[data-cp]").forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.onkeydown=e=>e.stopPropagation();
   inp.onchange=async()=>{const v=inp.value;if(v&&v>todayStr()){toast("The completed date can't be in the future.");inp.value="";return;}if(!canSave()){refresh();return;}inp.disabled=true;
     try{await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===j.id);const pp=jj&&(jj.poles||[]).find(x=>x.id===inp.dataset.cp);if(!pp)throw new Error("This location was removed.");
@@ -807,17 +849,17 @@ function renderJobPage(){
     tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceSheet(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+'</td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+(s.lines||[]).length+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="7"><div class="empty"><b>No unit sheets yet</b>Crews submit one sheet per location.</div></td></tr>';
     bindRows(tb,id=>location.hash="sheet-"+id);return;}
   const q=S.pf.q||"",stf=S.pf.st||"";
-  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Completed","Not completed","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
-    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Completed</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
+  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Work: Not started","Work: Started","Work: Complete","Completed","Not completed","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
+    '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Work status</th><th class="nosort">CM / billing status</th><th class="nosort">Completed</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
   const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
   function fill(){const tb=document.getElementById("pl-body");const qq=(S.pf.q||"").trim().toLowerCase();const sx=sheets();
     const rows=(j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);const stt=poleStatus(sh);
       const appr=sh.filter(s=>isReady(s)||s.status===ST.INV).map(priceSheet);const amt=appr.some(x=>x.total==null)?null:appr.reduce((a,x)=>a+x.total,0);return{p,sh,stt,amt,napp:appr.length};})
-      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):S.pf.st==="Completed"?!!r.p.completed:S.pf.st==="Not completed"?!r.p.completed:r.stt[0]===S.pf.st)));
+      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):S.pf.st==="Completed"?!!r.p.completed:S.pf.st==="Not completed"?!r.p.completed:/^Work: /.test(S.pf.st)?workSt(j,r.p,r.sh).lab===S.pf.st.slice(6):r.stt[0]===S.pf.st)));
     document.getElementById("pl-count").textContent=rows.length+" of "+(j.poles||[]).length+" locations"+(sa.shut?" · "+sa.shut+" shutdown":"");
     tb.innerHTML=rows.map(r=>{const p=r.p;const ar=poleArea(j,p);return'<tr tabindex="0" data-id="'+esc(p.id)+'"><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.vzPole)+'</td><td class="mono">'+esc(p.pdfPage)+"</td><td>"+(ar?esc(ar)+(p.area?"":' <span class="sub">(job default)</span>'):'<span class="late">Not set</span>')+'</td><td class="mono">'+r.sh.length+"</td>"+
-      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+compCell(j,p)+"</td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="15"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
-    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);bindComp(tb,j);
+      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td>'+workCell(j,p,r.sh)+'</td><td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+compCell(j,p)+"</td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="16"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
+    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);bindComp(tb,j);bindWork(tb,j);
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
@@ -890,7 +932,8 @@ function openSheetUpload(jid,prefPole){
         '<label class="f" style="flex:2 1 260px">Location<select data-k="poleId"><option value="">— pick the location —</option>'+poles.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===e.poleId?" selected":"")+">#"+esc(x.n)+" "+esc(x.street)+" · "+esc(x.esPole)+" · "+esc(x.ticket)+"</option>").join("")+"</select></label>"+
         '<label class="f">Date<input type="date" data-k="workDate" value="'+esc(e.workDate)+'"></label><label class="f">Crew / lead<input data-k="crew" value="'+esc(e.crew)+'"></label>'+
         '<label class="f">WO #<input data-k="wo" value="'+esc(e.wo)+'"></label><label class="f">FWO #<input data-k="fwo" value="'+esc(e.fwo)+'"></label><label class="f">AWC<input data-k="awc" value="'+esc(e.awc)+'"></label>'+
-        '<label class="f">Pole set?<select data-k="poleSet"><option value="">—</option><option value="yes"'+(e.poleSet==="yes"?" selected":"")+'>Yes</option><option value="no"'+(e.poleSet==="no"?" selected":"")+">No</option></select></label></div>"+
+        '<label class="f">Pole set?<select data-k="poleSet"><option value="">—</option><option value="yes"'+(e.poleSet==="yes"?" selected":"")+'>Yes</option><option value="no"'+(e.poleSet==="no"?" selected":"")+">No</option></select></label>"+'<label class="f">Date pole set<input type="date" data-k="poleSetDate" value="'+esc(e.poleSetDate||"")+'" max="'+todayStr()+'"></label></div>'+
+        (ref?"":'<label class="chk" style="margin:6px 0"><input type="checkbox" data-nc'+(e.nc?" checked":"")+'> <b>Not complete — save as Started</b> <span class="sub">Pole set and/or some units done. Saved on the location but not sent to the CM or billed until it is finished.</span></label>')+
         (e.warn.length?'<div class="banner">'+e.warn.map(esc).join("<br>")+"</div>":"")+
         '<table class="su-units"><tbody>'+lines.map(k=>'<tr><td>'+esc((opts.find(o=>o[0]===k)||[k,unitInfo(k).item])[1])+'</td><td><input type="number" step="any" min="0" inputmode="decimal" data-q="'+esc(k)+'" value="'+esc(e.qty[k])+'"></td><td><button class="btn sm danger" type="button" data-rmq="'+esc(k)+'" aria-label="Remove unit">✕</button></td></tr>').join("")+
         '<tr><td><select data-addk><option value="">+ Add a unit…</option>'+opts.filter(o=>!(o[0] in e.qty)).map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+"</option>").join("")+'</select></td><td></td><td></td></tr></tbody></table>'+
@@ -898,12 +941,14 @@ function openSheetUpload(jid,prefPole){
         '<label class="f wide">Notes / extras / difficulty justification<textarea data-k="notes">'+esc(e.notes)+"</textarea></label></div>";}).join("");
     list.querySelectorAll(".su-card").forEach(card=>{const e=entries[+card.dataset.i];if(!ref)bindPhotoSlots(card,e.slots);
       card.querySelector("[data-inc]").onchange=ev=>{e.include=ev.target.checked;card.classList.toggle("off",!e.include);upd();};
+      const nc=card.querySelector("[data-nc]");if(nc)nc.onchange=()=>{e.nc=nc.checked;if(e.nc&&e.poleId&&!e.dup)e.include=true;if(!e.nc&&!Object.keys(e.qty).length)e.include=false;draw();};
       card.querySelectorAll("[data-k]").forEach(el=>{el[el.tagName==="SELECT"?"onchange":"oninput"]=()=>{e[el.dataset.k]=el.value;upd();};});
       card.querySelectorAll("[data-q]").forEach(el=>el.oninput=()=>{e.qty[el.dataset.q]=el.value;});
       card.querySelectorAll("[data-rmq]").forEach(b=>b.onclick=()=>{delete e.qty[b.dataset.rmq];draw();});
       card.querySelector("[data-addk]").onchange=ev=>{if(ev.target.value){e.qty[ev.target.value]="";draw();}};});
     upd();}
-  function upd(){const n=entries.filter(e=>e.include).length;const b=m.querySelector("#su-save");b.textContent=ref?"Save "+n+" unit sheet"+(n===1?"":"s"):"Submit "+n+" sheet"+(n===1?"":"s")+" to CM";b.disabled=!n;}
+  function upd(){const inc=entries.filter(e=>e.include);const st=ref?0:inc.filter(e=>e.nc).length,n=inc.length-st;const b=m.querySelector("#su-save");
+    b.textContent=ref?"Save "+n+" unit sheet"+(n===1?"":"s"):[n?"Submit "+n+" to CM":"",st?(n?"save ":"Save ")+st+" as Started":""].filter(Boolean).join(" + ");b.disabled=!inc.length;}
   m.querySelector("#su-tpl").onclick=ev=>downloadUnitXlsx(j,ev.target);
   m.querySelector("#su-file").onchange=async ev=>{const f=ev.target.files[0];ev.target.value="";if(!f)return;
     if(f.size>PKG_MAX){toast(f.name+" is larger than 25 MB.",7000);return;}
@@ -921,7 +966,10 @@ function openSheetUpload(jid,prefPole){
         const workDate=parseSheetDate(s.date);if(s.date&&!workDate)w.push('Date "'+s.date+'" couldn\'t be read.');if(!s.date)w.push("No date on the sheet — it can be filled in later (optional).");if(!ref&&!String(s.crew||"").trim())w.push("No crew / lead on the sheet — it can be uploaded and filled in later (required before CM sign-off).");
         if(!Object.keys(qty).length)w.push("No unit quantities were read from this "+pw.toLowerCase()+".");
         const dup=pole&&!!workDate&&(ref?(j.unitRefs||[]).some(x=>x.poleId===pole.id&&x.workDate===workDate):sheets().some(x=>x.jobId===j.id&&x.poleId===pole.id&&x.workDate===workDate));if(dup)w.push("This location already has a unit sheet for this date.");
-        return{slots:{before:{},after:{}},page:s.page,include:!!pole&&(ref||Object.keys(qty).length>0)&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet,notes:s.notes,qty,warn:w};});
+        const qk=Object.keys(qty).filter(k=>Number(qty[k])>0);const onlySet=qk.length>0&&qk.every(k=>/^pole set\|/.test(k));
+        const ncv=!ref&&(s.complete==="no"||(s.complete!=="yes"&&onlySet));if(ncv)w.push(s.complete==="no"?"Marked not complete on the "+pw.toLowerCase()+", so it will be saved as Started.":"Only a pole set was read, so it's marked Not complete (saved as Started). Untick it if the location is finished.");
+        const psd=parseSheetDate(s.poleSetDate||"")||(ncv&&(s.poleSet==="yes"||onlySet)?workDate:"");
+        return{nc:ncv,dup,slots:{before:{},after:{}},page:s.page,include:!!pole&&(ref||ncv||Object.keys(qty).length>0)&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet||(psd?"yes":""),poleSetDate:psd,notes:s.notes,qty,warn:w};});
       info.textContent=f.name+": "+entries.length+(isX?" row(s) with quantities":" sheet page(s) found");
       m.querySelector("#su-warn").innerHTML=warn.length?'<div class="banner">'+warn.map(esc).join("<br>")+"</div>":"";draw();}
     catch(e){info.textContent="";toast("Couldn't read the PDF: "+errText(e),10000);}};
@@ -929,16 +977,19 @@ function openSheetUpload(jid,prefPole){
     const sel=entries.filter(x=>x.include);
     if(ref)return saveUnitRefs(j,file,sel,e.target,pw);
     for(const x of sel){if(!x.poleId)throw new Error(pw+" "+x.page+": pick the location.");
-      const ks=Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!=="");if(!ks.length)throw new Error(pw+" "+x.page+": no unit quantities.");
+      if(x.poleSetDate&&x.poleSetDate>todayStr())throw new Error(pw+" "+x.page+": the pole set date can't be in the future.");
+      if(x.nc&&x.poleSet==="yes"&&!x.poleSetDate)throw new Error(pw+" "+x.page+": enter the date the pole was set.");
+      const ks=Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!=="");if(!ks.length&&!x.nc)throw new Error(pw+" "+x.page+": no unit quantities.");
+      if(!ks.length&&x.nc&&x.poleSet!=="yes")throw new Error(pw+" "+x.page+": a started location needs the pole set (with its date) or at least one unit.");
       for(const k of ks){const q=Number(x.qty[k]);if(!isFinite(q)||q<0)throw new Error(pw+" "+x.page+": "+unitInfo(k).item+" quantity isn't a number.");}
       const miss=photosMissing(x.slots);if(needPhotos()&&miss.length)throw new Error(pw+" "+x.page+": add the "+miss.join(" and ")+" photo"+(miss.length>1?"s":"")+".");}
     if(!canSave())return;
-    const src=await storePackage(file);let made=0;const fails=[];
+    const src=await storePackage(file);let made=0,mst=0;const fails=[];
     for(const x of sel){const lines=Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!==""&&Number(x.qty[k])>0).map(k=>({key:k,qty:Number(x.qty[k]),note:""}));
       const photos=await savePhotos(x.slots);
-      const doc={photos,jobId:j.id,poleId:x.poleId,poleText:"",workDate:x.workDate,crew:x.crew.trim(),awc:x.awc.trim(),wo:x.wo.trim(),fwo:x.fwo.trim(),poleSet:x.poleSet,notes:x.notes.trim(),lines,status:ST.SUB,submittedAt:new Date().toISOString(),source:{file:src.file,name:src.name,page:x.page}};
-      const id=await createDoc("sheet",doc,"Uploaded from "+src.name+" page "+x.page+" ("+lines.length+" unit line(s))");if(id)made++;else fails.push(x.page);}
-    closeOverlay();refresh();toast(made+" unit sheet(s) submitted to the CM"+(fails.length?". Pages not saved: "+fails.join(", "):""),9000);});
+      const doc={photos,jobId:j.id,poleId:x.poleId,poleText:"",workDate:x.workDate,crew:x.crew.trim(),awc:x.awc.trim(),wo:x.wo.trim(),fwo:x.fwo.trim(),poleSet:x.poleSet,poleSetDate:x.poleSetDate||"",notes:x.notes.trim(),lines,status:x.nc?ST.STA:ST.SUB,source:{file:src.file,name:src.name,page:x.page}};if(!x.nc)doc.submittedAt=new Date().toISOString();
+      const id=await createDoc("sheet",doc,(x.nc?"Saved as Started (not complete) from ":"Uploaded from ")+src.name+" "+pw.toLowerCase()+" "+x.page+" ("+lines.length+" unit line(s)"+(x.poleSetDate?", pole set "+fmtD(x.poleSetDate):"")+")");if(id){if(x.nc)mst++;else made++;}else fails.push(x.page);}
+    closeOverlay();refresh();toast([made?made+" unit sheet(s) submitted to the CM":"",mst?mst+" saved as Started (not sent to the CM)":""].filter(Boolean).join(" · ")+(fails.length?". Not saved: "+pw.toLowerCase()+" "+fails.join(", "):""),9000);});
 }
 
 /* T&E jobs: unit sheets kept per location for reference (never billed) — stored on the job in the index, page image + source PDF in data/files */
@@ -1178,7 +1229,7 @@ function openJobForm(id){
 }
 
 /* ---------- pole register ---------- */
-function poleStatus(sh){
+function poleStatus(sh){sh=sh.filter(s=>s.status!==ST.STA);
   if(!sh.length)return["Not started","c-stage"];
   const open=sh.filter(s=>s.status!==ST.INV);
   if(!open.length)return["Invoiced","c-stage"];

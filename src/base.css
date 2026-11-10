@@ -170,3 +170,4 @@ label.chk input{width:auto}
 .okbox{background:var(--ok-bg);color:var(--ok);border-radius:4px;padding:10px 12px;font-size:14px}
 .okbox code{font-size:15px;font-weight:700;color:var(--ink);user-select:all}
 @media (max-width:760px){.who .nm{display:none}}
+.ws-btn{cursor:pointer;font:inherit;font-size:12.5px;font-weight:600}

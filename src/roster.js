@@ -348,7 +348,7 @@ function renderShutdowns(){const f=S.sdf||(S.sdf={q:"",job:"",when:""});
     download(new Blob(["﻿"+L.map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(",")).join("\r\n")],{type:"text/csv"}),"Shutdowns.csv");};}
 
 /* ---------- Excel unit sheets: one row per location (template download + upload reader) ---------- */
-const UX_FIELDS=[["ticket","Ticket ID"],["locno","Loc #"],["pole","Pole #"],["street","Location"],["date","Work date (MM/DD/YYYY)"],["crew","Crew / lead"],["wo","Work order #"],["fwo","Field work order #"],["awc","AWC"],["poleset","Pole set (Y/N)"],["notes","Notes / other work"]];
+const UX_FIELDS=[["ticket","Ticket ID"],["locno","Loc #"],["pole","Pole #"],["street","Location"],["date","Work date (MM/DD/YYYY)"],["crew","Crew / lead"],["wo","Work order #"],["fwo","Field work order #"],["awc","AWC"],["poleset","Pole set (Y/N)"],["psdate","Date pole set (MM/DD/YYYY)"],["complete","Location complete (Y/N)"],["notes","Notes / other work"]];
 const uxNorm=s=>String(s==null?"":s).toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9.]+/g," ").replace(/\s+/g," ").trim();
 const uxUnits=()=>CREW_SECTIONS.flatMap(([sec,items])=>items.map(([k,l])=>({key:k,sec,label:l,head:sec+" — "+l})));
 function uxColName(i){let s="";i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s;}
@@ -371,17 +371,18 @@ async function uxWriteXlsx(name,rows,o){const Z=window.JSZip;if(!Z)throw new Err
   return z.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});}
 async function downloadUnitXlsx(j,btn){try{if(btn)btn.disabled=true;const U=uxUnits();
   const locs=(j.poles||[]).slice().sort((a,b)=>(a.n||0)-(b.n||0));
-  const rows=[[{v:"Unit sheets — "+j.name+" (one row per location). Fill in the yellow cells: work date, crew, quantities. Leave a row's quantities blank to skip it. Upload on the job page with Upload Unit Sheets.",s:4}],
+  const rows=[[{v:"Unit sheets — "+j.name+" (one row per location). Fill in the yellow cells: work date, crew, quantities. Leave a row's quantities blank to skip it. Not finished yet? Put N under Location complete (and the date pole set): it is saved as Started, not sent to the CM. Upload on the job page with Upload Unit Sheets.",s:4}],
     UX_FIELDS.map(f=>({v:f[0],s:3})).concat(U.map(u=>({v:u.key,s:3}))),
     UX_FIELDS.map(f=>({v:f[1],s:1})).concat(U.map(u=>({v:u.head,s:1})))];
-  locs.forEach(p=>rows.push([p.ticket||"",p.n||"",p.esPole||"",[p.street,p.town].filter(Boolean).join(", "),{v:"",s:2},{v:"",s:2},p.woJob||j.wo||"",{v:"",s:2},{v:"",s:2},{v:"",s:2},{v:"",s:2}].map(v=>typeof v==="object"?v:{v,s:0}).concat(U.map(()=>({v:"",s:2})))));
-  const blob=await uxWriteXlsx("Unit Sheets",rows,{hidden:[2],freeze:{r:3,c:4},heights:{3:54},widths:[10,6,12,28,13,16,12,12,10,9,28].concat(U.map(()=>13))});
+  locs.forEach(p=>rows.push([p.ticket||"",p.n||"",p.esPole||"",[p.street,p.town].filter(Boolean).join(", "),{v:"",s:2},{v:"",s:2},p.woJob||j.wo||"",{v:"",s:2},{v:"",s:2},{v:"",s:2},{v:"",s:2},{v:"",s:2},{v:"",s:2}].map(v=>typeof v==="object"?v:{v,s:0}).concat(U.map(()=>({v:"",s:2})))));
+  const blob=await uxWriteXlsx("Unit Sheets",rows,{hidden:[2],freeze:{r:3,c:4},heights:{3:54},widths:[10,6,12,28,13,16,12,12,10,9,13,11,28].concat(U.map(()=>13))});
   download(blob,j.name.replace(/[\\/:*?"<>|]+/g," ")+" Unit Sheets.xlsx");toast("Downloaded the Excel unit sheet: "+locs.length+" locations",4000);}
   catch(x){toast(errText(x),8000);}finally{if(btn)btn.disabled=false;}}
 /* read a one-row-per-location workbook into the same entries the PDF reader gives */
 async function readUnitXlsx(file){const T=await TMPL.tables(await file.arrayBuffer());const name=T.names.find(n=>/unit/i.test(n))||T.names[0];const g=await T.get(name);const U=uxUnits();
   const byLabel=new Map();U.forEach(u=>{[u.key,u.head,u.sec+" "+u.label,u.label,(unitInfo(u.key).workType||"")+" "+unitInfo(u.key).item,unitInfo(u.key).item].forEach(x=>{const k=uxNorm(x);if(k&&!byLabel.has(k))byLabel.set(k,u.key);});});
   const fieldOf=h=>{const s=uxNorm(h);if(!s)return null;const fk=UX_FIELDS.find(f=>f[0]===s);if(fk)return fk[0];
+    if(/^(date pole set|pole set date)/.test(s))return"psdate";if(/^(location )?complete/.test(s))return"complete";
     if(/^ticket/.test(s))return"ticket";if(/^(loc|location) ?(#|no|number)?$/.test(s)&&!/street/.test(s)&&s!=="location")return"locno";if(/^(es )?pole ?(#|no|number)?$/.test(s))return"pole";if(/^(work )?date/.test(s))return"date";if(/crew|lead|foreman/.test(s))return"crew";
     if(/^(fwo|field work order)/.test(s))return"fwo";if(/^(wo|work order|job)/.test(s))return"wo";if(/^awc/.test(s))return"awc";if(/^pole set( y n)?$/.test(s))return"poleset";if(/^note/.test(s))return"notes";if(/street|address|^location$/.test(s))return"street";return null;};
   let keyRow=-1,headRow=-1;for(let i=0;i<Math.min(g.length,15);i++){const r=g[i].map(uxNorm);if(r.includes("ticket")&&r.includes("pole"))keyRow=i;else if(headRow<0&&r.some(c=>/^(es )?pole ?(#|no)?$/.test(c)||/^ticket/.test(c)))headRow=i;}
@@ -393,11 +394,11 @@ async function readUnitXlsx(file){const T=await TMPL.tables(await file.arrayBuff
     const qty={},warn=[];let any=false;
     cols.forEach((c,ci)=>{if(!c||!c.k)return;const raw=r[ci];if(raw===""||raw==null)return;const n=Number(String(raw).replace(/[, ]/g,""));if(!isFinite(n)||n<0){warn.push(unitInfo(c.k).item+': "'+raw+'" isn’t a number.');return;}if(n>0){qty[c.k]=n;any=true;}});
     unknown.forEach(u=>{const raw=r[u.ci];if(raw!==""&&raw!=null&&Number(raw)>0){warn.push('Column "'+u.h+'" ('+raw+") isn’t a unit on the rate list — add the right unit by hand.");any=true;}});
-    let d=v("date");if(typeof d==="number"&&d>20000&&d<80000){const dt=new Date(Math.round((d-25569)*86400000));d=String(dt.getUTCMonth()+1).padStart(2,"0")+"/"+String(dt.getUTCDate()).padStart(2,"0")+"/"+dt.getUTCFullYear();}
-    else if(typeof d==="string"&&/^\d{4}-\d{2}-\d{2}/.test(d)){const [y,m,dd]=d.slice(0,10).split("-");d=m+"/"+dd+"/"+y;}
-    const ps=uxNorm(v("poleset"));
-    if(!any&&!String(v("crew")||"").trim()&&!d)continue;
-    if(!any)continue;
+    const xd=d=>{if(typeof d==="number"&&d>20000&&d<80000){const dt=new Date(Math.round((d-25569)*86400000));return String(dt.getUTCMonth()+1).padStart(2,"0")+"/"+String(dt.getUTCDate()).padStart(2,"0")+"/"+dt.getUTCFullYear();}
+      if(typeof d==="string"&&/^\d{4}-\d{2}-\d{2}/.test(d)){const [y,m,dd]=d.slice(0,10).split("-");return m+"/"+dd+"/"+y;}return d;};
+    const d=xd(v("date")),psd=xd(v("psdate"));
+    const ps=uxNorm(v("poleset")),cp=uxNorm(v("complete"));const complete=/^(y|yes|x|1|true)$/.test(cp)?"yes":/^(n|no|0|false)$/.test(cp)?"no":"";
+    if(!any&&!(complete==="no"&&(String(psd||"").trim()||/^(y|yes|x|1|true)$/.test(ps))))continue;
     sheets.push({page:i+1,ticket:String(v("ticket")||"").trim().toUpperCase(),locNo:String(v("locno")||"").trim(),pole:String(v("pole")||"").trim()+" "+String(v("street")||""),date:String(d||"").trim(),crew:String(v("crew")||"").trim(),wo:String(v("wo")||"").trim(),fwo:String(v("fwo")||"").trim(),awc:String(v("awc")||"").trim(),
-      poleSet:/^(y|yes|x|1|true)$/.test(ps)?"yes":/^(n|no|0|false)$/.test(ps)?"no":"",notes:String(v("notes")||"").trim(),qty,others:[],warn});}
+      poleSet:/^(y|yes|x|1|true)$/.test(ps)||String(psd||"").trim()?"yes":/^(n|no|0|false)$/.test(ps)?"no":"",poleSetDate:String(psd||"").trim(),complete,notes:String(v("notes")||"").trim(),qty,others:[],warn});}
   return{sheets,excel:true,tab:name};}
