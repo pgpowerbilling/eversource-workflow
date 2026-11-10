@@ -679,6 +679,28 @@ function shutCell(j,p){const on=sdOn(p);const ok=canShutdown(j);const d=on?p.shu
 /* ---------- completed date per location (unit jobs) ---------- */
 function compCell(j,p){const ok=canShutdown(j);const v=p.completed||"";
   return ok?'<input type="date" class="cp-in" data-cp="'+esc(p.id)+'" value="'+esc(v)+'" max="'+todayStr()+'" aria-label="Completed date" title="'+(v&&p.completedBy?"Set by "+esc(p.completedBy):"Date the location was completed")+'">':(v?esc(fmtD(v)):'<span class="sub">—</span>');}
+/* pole set only: a unit sheet that just records the pole was set (date + set level). Tracking only — never billed, location stays remaining. */
+const PS_KEYS=CREW_SECTIONS.filter(s=>s[0]==="Pole set").flatMap(s=>s[1]).filter(i=>i[0]!==CK).map(i=>[i[0],i[1]]);
+const psLabel=k=>(PS_KEYS.find(x=>x[0]===k)||[k,unitInfo(k).item])[1];
+function poleSetChip(j,p){const r=p.poleSetRec;if(!r)return"";const ed=canShutdown(j)&&!j.archived;
+  return'<div style="margin-top:4px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span class="chip c-sch" title="'+esc(psLabel(r.key)+(r.qty&&r.qty!==1?" × "+fmtN(r.qty):"")+(r.crew?" · "+r.crew:"")+" · recorded by "+r.by)+'">Pole set '+esc(fmtD(r.date))+"</span>"+
+    (r.src?'<button class="btn sm" type="button" data-psv="'+esc(p.id)+'" aria-label="View pole set sheet">Sheet</button>':"")+(ed?'<button class="btn sm" type="button" data-psx="'+esc(p.id)+'" aria-label="Remove pole set record">✕</button>':"")+"</div>";}
+function bindPoleSet(tb,j){
+  tb.querySelectorAll("[data-psv]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();const p=poleById(j,b.dataset.psv);if(p&&p.poleSetRec&&p.poleSetRec.src)openPackage(p.poleSetRec.src,b);});
+  tb.querySelectorAll("[data-psx]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();const pid=b.dataset.psx;const p=poleById(j,pid);
+    confirmBox("Remove the pole set record?","Location #"+p.n+" "+p.street+" · pole set "+fmtD(p.poleSetRec.date)+". Nothing was billed, so no invoice changes.","Remove",async()=>{if(!canSave())return;
+      await commitIndex(ix=>{const pp=((ix.jobs.find(x=>x.id===j.id)||{}).poles||[]).find(x=>x.id===pid);if(pp&&pp.poleSetRec){(pp.poleSetLog=pp.poleSetLog||[]).push(Object.assign({removedBy:S.me.name,removedAt:new Date().toISOString()},pp.poleSetRec));delete pp.poleSetRec;}},"Workflow: pole set record removed");refresh();toast("Pole set record removed");},{danger:true});});}
+async function savePoleSetOnly(j,file,list,pw){
+  for(const x of list){if(!x.poleId)throw new Error(pw+" "+x.page+": pick the location.");if(!x.workDate)throw new Error(pw+" "+x.page+": enter the date the pole was set.");
+    if(x.workDate>todayStr())throw new Error(pw+" "+x.page+": the pole set date can't be in the future.");if(!x.psKey)throw new Error(pw+" "+x.page+": pick the pole set level.");
+    const q=Number(String(x.psQty).trim()===""?1:x.psQty);if(!isFinite(q)||q<=0)throw new Error(pw+" "+x.page+": pole set quantity isn't a number.");}
+  const ids=list.map(x=>x.poleId);if(new Set(ids).size!==ids.length)throw new Error("Two pole-set-only "+pw.toLowerCase()+"s point at the same location.");
+  const src=await storePackage(file);const at=new Date().toISOString();
+  await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===j.id);if(!jj)throw new Error("This job was removed.");
+    list.forEach(x=>{const pp=(jj.poles||[]).find(p=>p.id===x.poleId);if(!pp)throw new Error(pw+" "+x.page+": that location was removed.");
+      if(pp.poleSetRec)(pp.poleSetLog=pp.poleSetLog||[]).push(Object.assign({replacedAt:at,replacedBy:S.me.name},pp.poleSetRec));
+      pp.poleSetRec={date:x.workDate,key:x.psKey,qty:Number(String(x.psQty).trim()===""?1:x.psQty),crew:String(x.crew||"").trim(),notes:String(x.notes||"").trim(),src:{file:src.file,name:src.name,size:src.size,page:x.page},by:S.me.name,at};});},"Workflow: pole set only ("+list.length+")");
+  return list.length;}
 function bindComp(tb,j){tb.querySelectorAll("[data-cp]").forEach(inp=>{inp.onclick=e=>e.stopPropagation();inp.onkeydown=e=>e.stopPropagation();
   inp.onchange=async()=>{const v=inp.value;if(v&&v>todayStr()){toast("The completed date can't be in the future.");inp.value="";return;}if(!canSave()){refresh();return;}inp.disabled=true;
     try{await commitIndex(ix=>{const jj=ix.jobs.find(x=>x.id===j.id);const pp=jj&&(jj.poles||[]).find(x=>x.id===inp.dataset.cp);if(!pp)throw new Error("This location was removed.");
@@ -807,17 +829,17 @@ function renderJobPage(){
     tb.innerHTML=rows.map(s=>{const pr=can.seePrice()?priceSheet(s):null;return'<tr tabindex="0" data-id="'+esc(s.id)+'"><td class="mono"><b>'+esc(s.no)+"</b></td><td>"+dateCell(s)+'</td><td class="wrapc">'+esc(sheetPoleText(s))+"</td><td>"+crewCell(s)+'</td><td class="mono">'+(s.lines||[]).length+"</td>"+(pr?'<td class="mono num">'+(pr.total==null?'<span class="sub">Check pricing</span>':money(pr.total))+"</td>":"")+"<td>"+stChip(s)+"</td></tr>";}).join("")||'<tr><td colspan="7"><div class="empty"><b>No unit sheets yet</b>Crews submit one sheet per location.</div></td></tr>';
     bindRows(tb,id=>location.hash="sheet-"+id);return;}
   const q=S.pf.q||"",stf=S.pf.st||"";
-  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Completed","Not completed","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
+  box.innerHTML='<div class="filters" style="margin-bottom:10px"><input type="search" id="pl-q" placeholder="Search street, pole #, ticket…" aria-label="Search locations" value="'+esc(q)+'"><select id="pl-st" aria-label="Status"><option value="">All statuses</option>'+["Not started","Awaiting CM signature","Returned to field","Ready to bill","Invoiced","Completed","Not completed","Pole set (not completed)","Shutdown"].map(s=>"<option"+(s===stf?" selected":"")+">"+s+"</option>").join("")+'</select><span class="count" id="pl-count"></span></div>'+
     '<div class="tablebox"><table><thead><tr><th class="nosort">#</th><th class="nosort">Ticket ID</th><th class="nosort">Town</th><th class="nosort">Street</th><th class="nosort">ES pole #</th><th class="nosort">VZ pole #</th><th class="nosort">PDF page</th><th class="nosort">Pricing area</th><th class="nosort">Sheets</th>'+(can.seePrice()?'<th class="nosort num">Approved $</th>':"")+'<th class="nosort">Status</th><th class="nosort">Completed</th><th class="nosort">Shutdown</th><th class="nosort">Notes</th><th class="nosort"></th></tr></thead><tbody id="pl-body"></tbody></table></div>';
   const qi=document.getElementById("pl-q"),si=document.getElementById("pl-st");qi.oninput=()=>{S.pf.q=qi.value;fill();};si.onchange=()=>{S.pf.st=si.value;fill();};
   function fill(){const tb=document.getElementById("pl-body");const qq=(S.pf.q||"").trim().toLowerCase();const sx=sheets();
     const rows=(j.poles||[]).map(p=>{const sh=sx.filter(s=>s.jobId===j.id&&s.poleId===p.id);const stt=poleStatus(sh);
       const appr=sh.filter(s=>isReady(s)||s.status===ST.INV).map(priceSheet);const amt=appr.some(x=>x.total==null)?null:appr.reduce((a,x)=>a+x.total,0);return{p,sh,stt,amt,napp:appr.length};})
-      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):S.pf.st==="Completed"?!!r.p.completed:S.pf.st==="Not completed"?!r.p.completed:r.stt[0]===S.pf.st)));
+      .filter(r=>(!qq||[r.p.street,r.p.esPole,r.p.vzPole,r.p.ticket,r.p.town,r.p.notes].join(" ").toLowerCase().indexOf(qq)>=0)&&(!S.pf.st||(S.pf.st==="Shutdown"?sdOn(r.p):S.pf.st==="Completed"?!!r.p.completed:S.pf.st==="Not completed"?!r.p.completed:S.pf.st==="Pole set (not completed)"?!!r.p.poleSetRec&&!r.p.completed:r.stt[0]===S.pf.st)));
     document.getElementById("pl-count").textContent=rows.length+" of "+(j.poles||[]).length+" locations"+(sa.shut?" · "+sa.shut+" shutdown":"");
     tb.innerHTML=rows.map(r=>{const p=r.p;const ar=poleArea(j,p);return'<tr tabindex="0" data-id="'+esc(p.id)+'"><td class="mono">'+esc(p.n)+'</td><td class="mono">'+esc(p.ticket)+"</td><td>"+esc(p.town)+"</td><td><b>"+esc(p.street)+'</b></td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+esc(p.vzPole)+'</td><td class="mono">'+esc(p.pdfPage)+"</td><td>"+(ar?esc(ar)+(p.area?"":' <span class="sub">(job default)</span>'):'<span class="late">Not set</span>')+'</td><td class="mono">'+r.sh.length+"</td>"+
-      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span></td><td>"+compCell(j,p)+"</td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="15"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
-    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);bindComp(tb,j);
+      (can.seePrice()?'<td class="mono num">'+(r.napp?(r.amt==null?'<span class="sub">Check pricing</span>':money(r.amt)):"")+"</td>":"")+'<td><span class="chip '+r.stt[1]+'">'+esc(r.stt[0])+"</span>"+poleSetChip(j,p)+"</td><td>"+compCell(j,p)+"</td><td>"+shutCell(j,p)+'</td><td class="wrapc sub">'+esc(p.notes)+'</td><td><button class="btn sm" type="button" data-print="'+esc(p.id)+'" aria-label="Print unit sheet for '+esc(p.street+" "+p.esPole)+'">Print</button></td></tr>';}).join("")||'<tr><td colspan="15"><div class="empty"><b>No locations</b>'+((j.poles||[]).length?"Nothing matches the filters.":(can.setup()?"Use + Add locations.":""))+"</div></td></tr>";
+    tb.querySelectorAll("[data-print]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();printUnitSheets(j,[poleById(j,b.dataset.print)]);});bindShut(tb,j);bindComp(tb,j);bindPoleSet(tb,j);
     if(role()!=="crew")bindRows(tb,pid=>openPoleForm(j.id,pid));}
   fill();
 }
@@ -891,19 +913,27 @@ function openSheetUpload(jid,prefPole){
         '<label class="f">Date<input type="date" data-k="workDate" value="'+esc(e.workDate)+'"></label><label class="f">Crew / lead<input data-k="crew" value="'+esc(e.crew)+'"></label>'+
         '<label class="f">WO #<input data-k="wo" value="'+esc(e.wo)+'"></label><label class="f">FWO #<input data-k="fwo" value="'+esc(e.fwo)+'"></label><label class="f">AWC<input data-k="awc" value="'+esc(e.awc)+'"></label>'+
         '<label class="f">Pole set?<select data-k="poleSet"><option value="">—</option><option value="yes"'+(e.poleSet==="yes"?" selected":"")+'>Yes</option><option value="no"'+(e.poleSet==="no"?" selected":"")+">No</option></select></label></div>"+
+        '<label class="chk su-pso" style="margin:6px 0"><input type="checkbox" data-pso'+(e.pso?" checked":"")+'> <b>Pole set only — not completed</b> <span class="sub">Records the date the pole was set and the set level. Tracking only: not billed, and the location stays remaining.</span></label>'+
         (e.warn.length?'<div class="banner">'+e.warn.map(esc).join("<br>")+"</div>":"")+
+        (e.pso?'<div class="row-inline" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="f" style="flex:2 1 260px">Pole set level<select data-psk><option value="">— pick —</option>'+PS_KEYS.map(o=>'<option value="'+esc(o[0])+'"'+(o[0]===e.psKey?" selected":"")+">"+esc(o[1])+"</option>").join("")+'</select></label><label class="f" style="flex:0 1 110px">Qty<input type="number" min="0" step="any" inputmode="decimal" data-psq value="'+esc(e.psQty)+'"></label>'+
+          (Object.keys(e.qty).some(k=>!PS_KEYS.some(x=>x[0]===k))?'<span class="sub" style="flex:1 1 100%">Other units read from this '+pw.toLowerCase()+" are left off. Untick to submit it as a full unit sheet.</span>":"")+"</div>"+
+          '<label class="f wide">Notes<textarea data-k="notes">'+esc(e.notes)+"</textarea></label></div>":
         '<table class="su-units"><tbody>'+lines.map(k=>'<tr><td>'+esc((opts.find(o=>o[0]===k)||[k,unitInfo(k).item])[1])+'</td><td><input type="number" step="any" min="0" inputmode="decimal" data-q="'+esc(k)+'" value="'+esc(e.qty[k])+'"></td><td><button class="btn sm danger" type="button" data-rmq="'+esc(k)+'" aria-label="Remove unit">✕</button></td></tr>').join("")+
         '<tr><td><select data-addk><option value="">+ Add a unit…</option>'+opts.filter(o=>!(o[0] in e.qty)).map(o=>'<option value="'+esc(o[0])+'">'+esc(o[1])+"</option>").join("")+'</select></td><td></td><td></td></tr></tbody></table>'+
         (ref?"":photoSlotsHtml("su"+i,needPhotos()))+
-        '<label class="f wide">Notes / extras / difficulty justification<textarea data-k="notes">'+esc(e.notes)+"</textarea></label></div>";}).join("");
-    list.querySelectorAll(".su-card").forEach(card=>{const e=entries[+card.dataset.i];if(!ref)bindPhotoSlots(card,e.slots);
+        '<label class="f wide">Notes / extras / difficulty justification<textarea data-k="notes">'+esc(e.notes)+"</textarea></label></div>");}).join("");
+    list.querySelectorAll(".su-card").forEach(card=>{const e=entries[+card.dataset.i];if(!ref&&!e.pso)bindPhotoSlots(card,e.slots);
       card.querySelector("[data-inc]").onchange=ev=>{e.include=ev.target.checked;card.classList.toggle("off",!e.include);upd();};
+      card.querySelector("[data-pso]").onchange=ev=>{e.pso=ev.target.checked;if(e.pso){if(!e.psKey)e.psKey=psPick(e.qty);if(e.psQty==null||e.psQty==="")e.psQty=e.psKey&&Number(e.qty[e.psKey])>0?e.qty[e.psKey]:1;if(e.poleId&&e.workDate)e.include=true;}draw();};
+      const pk=card.querySelector("[data-psk]");if(pk)pk.onchange=()=>{e.psKey=pk.value;};const pq=card.querySelector("[data-psq]");if(pq)pq.oninput=()=>{e.psQty=pq.value;};
       card.querySelectorAll("[data-k]").forEach(el=>{el[el.tagName==="SELECT"?"onchange":"oninput"]=()=>{e[el.dataset.k]=el.value;upd();};});
       card.querySelectorAll("[data-q]").forEach(el=>el.oninput=()=>{e.qty[el.dataset.q]=el.value;});
       card.querySelectorAll("[data-rmq]").forEach(b=>b.onclick=()=>{delete e.qty[b.dataset.rmq];draw();});
-      card.querySelector("[data-addk]").onchange=ev=>{if(ev.target.value){e.qty[ev.target.value]="";draw();}};});
+      const ak=card.querySelector("[data-addk]");if(ak)ak.onchange=ev=>{if(ev.target.value){e.qty[ev.target.value]="";draw();}};});
     upd();}
-  function upd(){const n=entries.filter(e=>e.include).length;const b=m.querySelector("#su-save");b.textContent=ref?"Save "+n+" unit sheet"+(n===1?"":"s"):"Submit "+n+" sheet"+(n===1?"":"s")+" to CM";b.disabled=!n;}
+  function upd(){const inc=entries.filter(e=>e.include);const ps=inc.filter(e=>e.pso).length,n=inc.length-ps;const b=m.querySelector("#su-save");
+    b.textContent=[n?(ref?"Save "+n+" unit sheet"+(n===1?"":"s"):"Submit "+n+" sheet"+(n===1?"":"s")+" to CM"):"",ps?(n?"record ":"Record ")+ps+" pole set"+(ps===1?"":"s"):""].filter(Boolean).join(" + ");b.disabled=!inc.length;}
+  const psPick=q=>{const ks=PS_KEYS.map(x=>x[0]).filter(k=>Number(q[k])>0);return ks.length===1?ks[0]:"";};
   m.querySelector("#su-tpl").onclick=ev=>downloadUnitXlsx(j,ev.target);
   m.querySelector("#su-file").onchange=async ev=>{const f=ev.target.files[0];ev.target.value="";if(!f)return;
     if(f.size>PKG_MAX){toast(f.name+" is larger than 25 MB.",7000);return;}
@@ -921,12 +951,15 @@ function openSheetUpload(jid,prefPole){
         const workDate=parseSheetDate(s.date);if(s.date&&!workDate)w.push('Date "'+s.date+'" couldn\'t be read.');if(!s.date)w.push("No date on the sheet — it can be filled in later (optional).");if(!ref&&!String(s.crew||"").trim())w.push("No crew / lead on the sheet — it can be uploaded and filled in later (required before CM sign-off).");
         if(!Object.keys(qty).length)w.push("No unit quantities were read from this "+pw.toLowerCase()+".");
         const dup=pole&&!!workDate&&(ref?(j.unitRefs||[]).some(x=>x.poleId===pole.id&&x.workDate===workDate):sheets().some(x=>x.jobId===j.id&&x.poleId===pole.id&&x.workDate===workDate));if(dup)w.push("This location already has a unit sheet for this date.");
-        return{slots:{before:{},after:{}},page:s.page,include:!!pole&&(ref||Object.keys(qty).length>0)&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet,notes:s.notes,qty,warn:w};});
+        const qk=Object.keys(qty).filter(k=>Number(qty[k])>0&&k!==CK);const pso=qk.length>0&&qk.every(k=>PS_KEYS.some(x=>x[0]===k));if(pso)w.push("Only a pole set was read from this "+pw.toLowerCase()+", so it's marked Pole set only. Untick it to submit a full unit sheet.");
+        const psKey=psPick(qty),psQty=psKey?qty[psKey]:1;
+        return{pso,psKey,psQty,slots:{before:{},after:{}},page:s.page,include:!!pole&&(ref||pso||Object.keys(qty).length>0)&&!dup,poleId:pole?pole.id:"",workDate,crew:s.crew,wo:s.wo,fwo:s.fwo,awc:s.awc,poleSet:s.poleSet,notes:s.notes,qty,warn:w};});
       info.textContent=f.name+": "+entries.length+(isX?" row(s) with quantities":" sheet page(s) found");
       m.querySelector("#su-warn").innerHTML=warn.length?'<div class="banner">'+warn.map(esc).join("<br>")+"</div>":"";draw();}
     catch(e){info.textContent="";toast("Couldn't read the PDF: "+errText(e),10000);}};
   m.querySelector("#su-save").onclick=e=>busyRun(e.target,m,async()=>{
-    const sel=entries.filter(x=>x.include);
+    const all=entries.filter(x=>x.include);const pso=all.filter(x=>x.pso),sel=all.filter(x=>!x.pso);
+    if(pso.length){if(!canSave())return;e.target.textContent="Recording pole set…";const nps=await savePoleSetOnly(j,file,pso,pw);if(!sel.length){closeOverlay();refresh();toast(nps+" pole set"+(nps===1?"":"s")+" recorded (tracking only, not billed)",7000);return;}toast(nps+" pole set"+(nps===1?"":"s")+" recorded",5000);}
     if(ref)return saveUnitRefs(j,file,sel,e.target,pw);
     for(const x of sel){if(!x.poleId)throw new Error(pw+" "+x.page+": pick the location.");
       const ks=Object.keys(x.qty).filter(k=>String(x.qty[k]).trim()!=="");if(!ks.length)throw new Error(pw+" "+x.page+": no unit quantities.");
