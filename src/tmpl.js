@@ -78,12 +78,20 @@ async function fill(buf,inv){
   const p=await parse(buf);const t=await open(buf);
   if(inv.poles.length>p.layout.slots)throw new Error("This template has "+p.layout.slots+" pole slots; the invoice has "+inv.poles.length+" poles. Split it into smaller invoices.");
   let pr=await sheetXml(t,"Pole Register"),ub=await sheetXml(t,"Unit Billing Detail"),fi=await sheetXml(t,"Final Invoice"),co=await sheetXml(t,"Invoice Cover");
+  /* pricing areas the template doesn't have (e.g. Western Mass): put that area's rates into a Unit Rate Master column no pole on this invoice uses, so the workbook's own lookups price it */
+  const used=[...new Set(inv.poles.map(pl=>pl.area).filter(Boolean))];const extra=used.filter(a=>p.areas.indexOf(a)<0);
+  if(extra.length){const free=p.areas.map((a,i)=>[a,"DEFG"[i]]).filter(x=>used.indexOf(x[0])<0);
+    if(free.length<extra.length)throw new Error("This invoice uses more pricing areas than the template has columns for. Split it by pricing area.");
+    let um=await sheetXml(t,"Unit Rate Master");
+    extra.forEach((a,i)=>{const col=free[i][1];const rt=(inv.extraRates||{})[a]||{};um=setCellXml(um,col+"3",a);
+      p.units.forEach(u=>{um=setCellXml(um,col+u.row,typeof rt[u.key]==="number"?rt[u.key]:null);});});
+    t.zip.file(t.sheets["Unit Rate Master"],um);}
   inv.poles.forEach((pl,i)=>{const r=4+i;
     const set=(c,v)=>{pr=setCellXml(pr,c+r,v);};
     set("B",pl.town);set("C",pl.street);set("D",pl.esPole);set("E",pl.woJob);set("F","COMPLETE");set("G","APPROVED FOR BILLING");set("H",pl.gfBy);set("I",pl.gfDate);
     set("J",pl.area);set("M","APPROVED FOR INVOICE");set("N",pl.billDate);set("O",pl.notes||"");set("P",pl.ticket);set("Q",pl.vzPole);
     const base=4+i*p.layout.perPole;
-    Object.keys(pl.qty).forEach(k=>{const idx=p.layout.ubdOrder.indexOf(k);if(idx<0)throw new Error("Unit "+k+" is not in the template's Unit Billing Detail.");
+    Object.keys(pl.qty).forEach(k=>{const idx=p.layout.ubdOrder.indexOf(k);if(idx<0)throw new Error("\u201c"+(inv.unitName?inv.unitName(k):k)+"\u201d isn't on the Eversource invoice template (no row for it), so this invoice can't be exported to the template. Bill that unit separately or take it off the sheet.");
       ub=setCellXml(ub,"I"+(base+idx),Number(pl.qty[k].qty));if(pl.qty[k].note)ub=setCellXml(ub,"J"+(base+idx),pl.qty[k].note);});
   });
   fi=setCellXml(fi,"B5",inv.no);fi=setCellXml(fi,"B6",inv.dateText);if(inv.packageName)fi=setCellXml(fi,"F7",inv.packageName);

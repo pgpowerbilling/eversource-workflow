@@ -1264,7 +1264,8 @@ function renderRates(){
   const r=rates();const tm=S.index.template;
   main.innerHTML='<section class="jobhead"><div><h1>Rates &amp; invoice template</h1><div class="meta">'+(tm?"Template: <b>"+esc(tm.name)+"</b> · loaded "+esc(fmtT(tm.at))+" by "+esc(tm.by)+" · "+esc(tm.slots)+" pole slots per invoice":"No template loaded yet")+'</div></div><div class="acts"><button class="btn" type="button" id="r-dl"'+(tm?"":" disabled")+'>Download template</button><button class="btn primary w-only" type="button" id="r-up">Load new template</button></div></section>'+
     '<div class="note">Rates come straight from the template\'s <b>Unit Rate Master</b> and are applied by each pole\'s pricing area, the same way the workbook does it. To change rates, update the Unit Rate Master in the master template and load it here; the app shows every rate change before saving.</div>'+
-    (r?'<div class="tablebox"><table class="static"><thead><tr><th>Work type</th><th>Unit item</th>'+r.areas.map(a=>'<th class="num">'+esc(a)+"</th>").join("")+"</tr></thead><tbody>"+r.units.map(u=>"<tr><td>"+esc(u.workType)+'</td><td class="wrapc"><b>'+esc(u.item)+"</b></td>"+r.areas.map(a=>'<td class="mono num">'+money(u.rates[a])+"</td>").join("")+"</tr>").join("")+
+    (r&&r.extraSources?r.extraSources.map(x=>'<div class="note"><b>'+esc(x.areas.join(" and "))+"</b> rates come from "+esc(x.file)+", loaded "+esc(fmtD(x.at.slice(0,10)))+" by "+esc(x.by)+". "+esc(x.note||"")+"</div>").join(""):"")+
+    (r?'<div class="tablebox"><table class="static"><thead><tr><th>Work type</th><th>Unit item</th>'+r.areas.map(a=>'<th class="num">'+esc(a)+"</th>").join("")+"</tr></thead><tbody>"+r.units.map(u=>"<tr><td>"+esc(u.workType)+'</td><td class="wrapc"><b>'+esc(u.item)+"</b>"+(u.extra?' <span class="chip c-req" title="Not on the Eversource invoice template">Linewise only</span>':"")+"</td>"+r.areas.map(a=>'<td class="mono num">'+(u.rates[a]==null?'<span class="sub">—</span>':money(u.rates[a]))+"</td>").join("")+"</tr>").join("")+
       '<tr><td>Pole Set</td><td><b>C&amp;K</b> <span class="sub">(on the crew checklist)</span></td>'+r.areas.map(()=>'<td class="num"><span class="late">No rate</span></td>').join("")+"</tr></tbody></table></div>":'<div class="empty"><b>No rates yet</b>Load the master template to bring in the Unit Rate Master.</div>');
   document.getElementById("r-dl").onclick=async()=>{try{const b=await templateBuf();download(new Blob([b],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),tm.name);}catch(e){toast(errText(e),8000);}};
   const up=document.getElementById("r-up");if(up)up.onclick=openTemplateUpload;
@@ -1286,7 +1287,11 @@ function openTemplateUpload(){
   m.querySelector("#tu-save").onclick=e=>busyRun(e.target,m,async()=>{if(!parsed)return;
     const file="template-"+hexId(6)+".enc.json";
     await ghPut("data/"+file,JSON.stringify(await encJson(S.dek,{name,b64:b64(buf)})),null,"Workflow: store invoice template");
-    await commitIndex(ix=>{ix.rates={areas:parsed.areas,units:parsed.units.map(u=>({key:u.key,workType:u.workType,item:u.item,rates:u.rates})),from:parsed.from,terms:parsed.terms,customer:parsed.customer};
+    await commitIndex(ix=>{const old=ix.rates||{areas:[],units:[]};const xa=(old.areas||[]).filter(a=>parsed.areas.indexOf(a)<0);const om=new Map((old.units||[]).map(u=>[u.key,u]));
+      /* pricing areas and units that came from outside the template (e.g. Western Mass) are kept */
+      const units=parsed.units.map(u=>{const r=Object.assign({},u.rates);const o=om.get(u.key);xa.forEach(a=>{r[a]=o&&o.rates?o.rates[a]:null;});return{key:u.key,workType:u.workType,item:u.item,rates:r};});
+      (old.units||[]).filter(u=>u.extra&&!parsed.units.some(x=>x.key===u.key)).forEach(u=>units.push(u));
+      ix.rates={areas:parsed.areas.concat(xa),units,from:parsed.from,terms:parsed.terms,customer:parsed.customer,extraSources:old.extraSources};
       ix.template={file,name,at:new Date().toISOString(),by:S.me.name,slots:parsed.layout.slots,perPole:parsed.layout.perPole};(ix.rateLog=ix.rateLog||[]).push({t:new Date().toISOString(),by:S.me.name,name});},"Workflow: update rates from template");
     S.tmplBuf=buf;closeOverlay();refresh();toast("Template and rates saved");});
 }
@@ -1408,7 +1413,8 @@ async function exportTemplate(i,btn){
   const t=btn.textContent;btn.disabled=true;btn.textContent="Building…";
   try{
     const buf=await templateBuf();
-    const out=await TMPL.fill(buf,{no:i.no,dateText:fmtD(i.date),po:i.po,period:i.period,packageName:i.pkg,
+    const extraRates={};i.poles.forEach(p=>{const m=extraRates[p.area]||(extraRates[p.area]={});p.lines.forEach(l=>{if(typeof l.rate==="number")m[l.key]=l.rate;});});
+    const out=await TMPL.fill(buf,{no:i.no,dateText:fmtD(i.date),po:i.po,period:i.period,packageName:i.pkg,extraRates,unitName:k=>{const u=unitInfo(k);return u.workType?u.workType+" \u2013 "+u.item:u.item;},
       poles:i.poles.map(p=>{const q={};p.lines.forEach(l=>{q[l.key]={qty:l.qty,note:l.note};});return{town:p.town,street:p.street,esPole:p.esPole,woJob:p.woJob,area:p.area,gfBy:p.gfBy,gfDate:p.gfDate,billDate:p.billDate,notes:p.notes,ticket:p.ticket,vzPole:p.vzPole,qty:q};})});
     download(new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"Eversource_Unit_Billing_"+i.date+"_"+i.no.replace(/[\\/:*?"<>|]/g,"-")+".xlsx");
     toast("Template filled. Excel recalculates the totals when the file opens.",6000);
@@ -1432,5 +1438,5 @@ function printInvoice(i){
 }
 
 initLogin();
-window.__wf={S,priceSheet,buildInvoice,priceTe,sheets,roCounts,roAggregate,roWeekDays,rosters};
+window.__wf={S,priceSheet,buildInvoice,priceTe,sheets,roCounts,roAggregate,roWeekDays,rosters,exportTemplate};
 })();
