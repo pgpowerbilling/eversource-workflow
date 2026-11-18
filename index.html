@@ -478,14 +478,14 @@ async function parse(buf){
   const fi=await read(t,"Final Invoice");
   return{areas,units,layout:{perPole:per,slots:Math.min(slots,regRows||slots),ubdOrder:order},from,terms:fi.get("B7")?String(fi.get("B7")):"",customer:fi.get("F5")?String(fi.get("F5")):""};
 }
-function setCellXml(x,ref,val){
+function setCellXml(x,ref,val,force){
   const {row}=splitRef(ref);
   const cellXml=(attrs)=>{const s=/\bs="(\d+)"/.exec(attrs||"");const sa=s?' s="'+s[1]+'"':"";
     if(val==null||val==="")return'<c r="'+ref+'"'+sa+"/>";
     if(typeof val==="number"&&isFinite(val))return'<c r="'+ref+'"'+sa+"><v>"+String(val)+"</v></c>";
     return'<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+encX(val)+"</t></is></c>";};
   const cre=new RegExp('<c r="'+ref+'"(\\s[^>]*?)?(?:/>|>[\\s\\S]*?</c>)');
-  if(cre.test(x))return x.replace(cre,(m,a)=>{if(/<f[\s>]/.test(m))throw new Error("Template cell "+ref+" holds a formula and was not overwritten.");return cellXml(a);});
+  if(cre.test(x))return x.replace(cre,(m,a)=>{if(/<f[\s>]/.test(m)&&!force)throw new Error("Template cell "+ref+" holds a formula and was not overwritten.");return cellXml(a);});
   const rre=new RegExp('<row r="'+row+'"(\\s[^>]*?)?(/>|>([\\s\\S]*?)</row>)');
   const rm=rre.exec(x);
   if(rm){if(rm[2]==="/>")return x.replace(rm[0],'<row r="'+row+'"'+(rm[1]||"")+">"+cellXml("")+"</row>");
@@ -520,6 +520,11 @@ async function fill(buf,inv){
       ub=setCellXml(ub,"I"+(base+idx),Number(pl.qty[k].qty));if(pl.qty[k].note)ub=setCellXml(ub,"J"+(base+idx),pl.qty[k].note);});
   });
   fi=setCellXml(fi,"B5",inv.no);fi=setCellXml(fi,"B6",inv.dateText);if(inv.packageName)fi=setCellXml(fi,"F7",inv.packageName);
+  /* one-off adjustment: cover row 56 becomes the adjustment line and row 57 the total (subtotal + adjustment) */
+  if(inv.adj&&inv.adj.amount){const st=r=>{const m=new RegExp('<c r="'+r+'"(\\s[^>]*?)?(?:/>|>)').exec(co);const s=m&&/\bs="(\d+)"/.exec(m[1]||"");return s?' s="'+s[1]+'"':"";};
+    const sA=st("A56"),sE=st("E56");co=setCellXml(co,"A56",inv.adj.label,true);co=setCellXml(co,"E56",inv.adj.amount,true);
+    co=setCellXml(co,"A57","TOTAL");co=setCellXml(co,"E57",0);
+    co=co.replace(/<c r="A57"[^>]*?(\/>|>[\s\S]*?<\/c>)/,'<c r="A57"'+sA+' t="inlineStr"><is><t>TOTAL</t></is></c>').replace(/<c r="E57"[^>]*?(\/>|>[\s\S]*?<\/c>)/,'<c r="E57"'+sE+"><f>ROUND(E55+E56,2)</f></c>");}
   if(inv.po)co=setCellXml(co,"F8",inv.po);if(inv.period)co=setCellXml(co,"F9",inv.period);
   t.zip.file(t.sheets["Pole Register"],pr);t.zip.file(t.sheets["Unit Billing Detail"],ub);t.zip.file(t.sheets["Final Invoice"],fi);t.zip.file(t.sheets["Invoice Cover"],co);
   let wb=await t.zip.file("xl/workbook.xml").async("string");
@@ -2054,7 +2059,7 @@ function renderInvoices(){
     :'<tr><td colspan="8"><div class="empty"><b>Nothing ready to bill</b>Unit sheets show up here once billing approves them for invoice.</div></td></tr>';
   rb.querySelectorAll("[data-build]").forEach(b=>b.onclick=()=>openInvoiceForm(b.dataset.build));
   const tb=document.getElementById("it");
-  tb.innerHTML=all.length?all.map(i=>'<tr tabindex="0" data-id="'+esc(i.id)+'"><td class="mono"><b>'+esc(i.no)+"</b></td><td>"+fmtD(i.date)+'</td><td><div class="job-name">'+esc(i.jobName)+"</div></td><td>"+esc(i.customer)+'</td><td class="mono">'+(i.kind==="te"?(i.days||[]).length+" day(s) T&amp;E":(i.poles||[]).length)+'</td><td class="mono num">'+money(i.total)+"</td><td>"+invChip(i.status)+"</td></tr>").join("")
+  tb.innerHTML=all.length?all.map(i=>'<tr tabindex="0" data-id="'+esc(i.id)+'"><td class="mono"><b>'+esc(i.no)+"</b></td><td>"+fmtD(i.date)+'</td><td><div class="job-name">'+esc(i.jobName)+"</div></td><td>"+esc(i.customer)+'</td><td class="mono">'+(i.kind==="te"?(i.days||[]).length+" day(s) T&amp;E":(i.poles||[]).length)+'</td><td class="mono num">'+money(i.kind==="te"?i.total:invBilled(i))+(i.adj?' <span class="sub" title="Includes '+esc(i.adj.label)+'">adj.</span>':"")+"</td><td>"+invChip(i.status)+"</td></tr>").join("")
     :'<tr><td colspan="7"><div class="empty"><b>No invoices yet</b></div></td></tr>';
   bindRows(tb,id=>location.hash="inv-"+id);
 }
@@ -2126,6 +2131,33 @@ function openInvoiceForm(presetJob){
     if(failed.length)toast("Invoice created, but these sheets could not be marked invoiced: "+failed.join(", ")+". Check them.",12000);else toast("Invoice "+no+" created");
   });
 }
+/* invoice adjustment: billed total can differ from the unit total (one-off, admins only). Units stay as priced; the difference is one adjustment line. */
+const invBilled=i=>cents((i.total||0)+(i.adj&&i.adj.amount||0));
+function openInvAdjust(id){const i=S.docs.get(id);if(!i||role()!=="admin")return;const a=i.adj||{};
+  const m=modal("Change date / total — "+esc(i.no),
+    '<p class="sub" style="margin:0 0 8px">One-off change to this invoice only. The unit lines stay as priced; the difference shows as one adjustment line on the invoice and on the Eversource template cover. Admins only, and logged in the history.</p>'+
+    '<label class="f">Invoice date<input type="date" id="ia-date" value="'+esc(i.date)+'"></label>'+
+    '<div class="details" style="margin:8px 0">'+dl("Unit total",'<b class="mono">'+money(i.total)+"</b>")+"</div>"+
+    '<label class="f">Billed total (USD) — leave blank to bill the unit total<input type="number" step="0.01" inputmode="decimal" id="ia-tot" value="'+(i.adj?esc(invBilled(i)):"")+'"></label>'+
+    '<p class="sub" id="ia-diff" style="margin:2px 0 8px"></p>'+
+    '<label class="f">Adjustment line description<input id="ia-lab" value="'+esc(a.label||"Job start-up costs")+'"></label>'+
+    '<label class="f">Reason (kept in the history)<textarea id="ia-why">'+esc(a.reason||"")+"</textarea></label>",
+    '<button class="btn" type="button" data-x>Cancel</button><button class="btn primary" type="button" id="ia-go">Save</button>');
+  const tot=m.querySelector("#ia-tot"),df=m.querySelector("#ia-diff");
+  const upd=()=>{const v=tot.value.trim();if(v===""){df.textContent="No adjustment: billed total = unit total "+money(i.total)+".";return;}const n=Number(v);df.textContent=isFinite(n)?"Adjustment line: "+money(cents(n-i.total))+" (billed "+money(cents(n))+" − units "+money(i.total)+")":"Not a number";};upd();tot.oninput=upd;
+  m.querySelector("#ia-go").onclick=e=>busyRun(e.target,m,async()=>{const date=m.querySelector("#ia-date").value,v=tot.value.trim(),lab=m.querySelector("#ia-lab").value.trim(),why=m.querySelector("#ia-why").value.trim();
+    if(!date)throw new Error("Enter the invoice date.");
+    let billed=null;if(v!==""){billed=Number(v);if(!isFinite(billed)||billed<0)throw new Error("Billed total isn't a valid amount.");billed=cents(billed);}
+    const amt=billed==null?0:cents(billed-i.total);
+    if(amt&&!lab)throw new Error("Enter a description for the adjustment line.");
+    if((amt||date!==i.date)&&!why)throw new Error("Enter the reason for the change.");
+    if(!amt&&!i.adj&&date===i.date)throw new Error("Nothing changed.");
+    if(!canSave())return;
+    const parts=[];if(date!==i.date)parts.push("date "+fmtD(i.date)+" → "+fmtD(date));
+    const was=invBilled(i);const now=cents(i.total+amt);if(now!==was||(i.adj&&!amt))parts.push("billed total "+money(was)+" → "+money(now)+(amt?" (units "+money(i.total)+" + "+lab+" "+money(amt)+")":" (unit total, adjustment removed)"));
+    else if(amt&&i.adj&&(lab!==i.adj.label))parts.push("adjustment line renamed to \u201c"+lab+"\u201d");
+    const ok=await commitDoc(id,x=>{x.date=date;if(amt)x.adj={amount:amt,label:lab,reason:why,by:S.me.name,at:new Date().toISOString()};else delete x.adj;},"Invoice changed: "+(parts.join("; ")||"no change")+(why?" · Reason: "+why:""));
+    if(ok){closeOverlay();toast("Invoice updated");}});}
 function renderInvoice(){
   const i=S.docs.get(S.docId);const id=S.docId;
   if(!i||i.type!=="invoice"||!can.seeInvoices()){main.innerHTML='<a class="back" href="#invoices">← Invoices</a><div class="empty"><b>Invoice not found</b></div>';return;}
@@ -2133,20 +2165,21 @@ function renderInvoice(){
   const chk=cents(i.poles.reduce((a,p)=>a+p.lines.reduce((x,l)=>x+(l.ext||0),0),0));const tieOk=chk===cents(i.total);
   const acts=['<button class="btn primary" type="button" id="v-xls">Eversource template (.xlsx)</button><button class="btn" type="button" id="v-pdf">P&amp;G invoice PDF</button>'];
   if(can.invoice()&&i.status==="Draft")acts.push('<button class="btn" type="button" id="v-sent">Mark as sent</button>');
+  if(role()==="admin"&&i.status!=="Void")acts.push('<button class="btn" type="button" id="v-adj">Change date / total</button>');
   if(can.invoice()&&i.status!=="Void")acts.push('<button class="btn danger" type="button" id="v-void">Void</button>');
   main.innerHTML='<a class="back" href="#invoices">← Invoices</a>'+
     '<section class="jobhead"><div><h1>Invoice '+esc(i.no)+'</h1><div class="meta">'+invChip(i.status)+"<span>"+esc(i.jobName)+"</span><span>"+esc(fmtD(i.date))+'</span></div></div><div class="acts">'+acts.join("")+"</div></section>"+
     (tieOk?"":'<div class="banner bad">Pole lines total '+money(chk)+" but the saved invoice total is "+money(i.total)+" (variance "+money(cents(chk-i.total))+"). Do not send until this is resolved.</div>")+
-    '<section class="details">'+dl("Bill to",esc(i.customer))+dl("Terms",esc(i.terms))+dl("PO#",esc(i.po))+dl("Billing period",esc(i.period))+dl("Billing package",esc(i.pkg))+dl("Invoice total",'<b class="mono">'+money(i.total)+"</b>")+dl("Unit sheets",esc(i.poles.flatMap(p=>p.sheetNos).join(", ")),true)+dl("Template",esc(i.template))+(i.sentAt?dl("Sent",esc(i.sentBy+" · "+fmtT(i.sentAt))):"")+"</section>"+
+    '<section class="details">'+dl("Bill to",esc(i.customer))+dl("Terms",esc(i.terms))+dl("PO#",esc(i.po))+dl("Billing period",esc(i.period))+dl("Billing package",esc(i.pkg))+(i.adj?dl("Unit total",'<span class="mono">'+money(i.total)+"</span>")+dl(i.adj.label,'<span class="mono">'+money(i.adj.amount)+'</span><div class="sub">'+esc(i.adj.reason)+" · "+esc(i.adj.by)+"</div>")+dl("Invoice total (billed)",'<b class="mono">'+money(invBilled(i))+"</b>"):dl("Invoice total",'<b class="mono">'+money(i.total)+"</b>"))+dl("Unit sheets",esc(i.poles.flatMap(p=>p.sheetNos).join(", ")),true)+dl("Template",esc(i.template))+(i.sentAt?dl("Sent",esc(i.sentBy+" · "+fmtT(i.sentAt))):"")+"</section>"+
     '<h2 class="sec">Invoice cover — unit billing summary</h2><div class="tablebox"><table class="static"><thead><tr><th>WO / Job #</th><th>Location / address</th><th>Pole #</th><th>Pole ID</th><th class="num">Amount</th><th>Pricing area</th></tr></thead><tbody>'+
     i.poles.map(p=>'<tr><td class="mono">'+esc(p.woJob)+"</td><td>"+esc(p.street+", "+p.town)+'</td><td class="mono">'+esc(p.esPole)+'</td><td class="mono">'+p.slot+'</td><td class="mono num">'+money(p.total)+"</td><td>"+esc(p.area)+"</td></tr>").join("")+
-    '</tbody><tfoot><tr><td colspan="4" class="num"><b>Total (USD)</b></td><td class="mono num"><b>'+money(i.total)+"</b></td><td></td></tr></tfoot></table></div>"+
+    '</tbody><tfoot>'+(i.adj?'<tr><td colspan="4" class="num">Unit subtotal</td><td class="mono num">'+money(i.total)+'</td><td></td></tr><tr><td colspan="4" class="num">'+esc(i.adj.label)+'</td><td class="mono num">'+money(i.adj.amount)+"</td><td></td></tr>":"")+'<tr><td colspan="4" class="num"><b>Total (USD)</b></td><td class="mono num"><b>'+money(invBilled(i))+"</b></td><td></td></tr></tfoot></table></div>"+
     '<h2 class="sec">Final invoice — pole and unit detail</h2>'+i.poles.map(p=>'<div class="tablebox" style="margin-bottom:10px"><table class="static"><thead><tr><th colspan="6">'+esc("POLE "+p.slot+"  |  "+p.street+"  |  POLE "+p.esPole+"  |  "+p.town+"  |  WO #"+p.woJob+"  |  "+p.area)+'</th></tr><tr class="subh"><td>Work type</td><td>Unit description</td><td class="num">Qty</td><td class="num">Unit price</td><td class="num">Amount</td><td>Note</td></tr></thead><tbody>'+
       p.lines.map(l=>"<tr><td>"+esc(l.workType)+"</td><td>"+esc(l.item)+'</td><td class="mono num">'+fmtN(l.qty)+'</td><td class="mono num">'+money(l.rate)+'</td><td class="mono num">'+money(l.ext)+'</td><td class="sub">'+esc(l.note)+"</td></tr>").join("")+
       '</tbody><tfoot><tr><td colspan="4" class="num"><b>Pole '+p.slot+' total</b></td><td class="mono num"><b>'+money(p.total)+'</b></td><td class="sub">'+esc(p.sheetNos.join(", "))+"</td></tr></tfoot></table></div>").join("")+
     '<h2 class="sec">History</h2>'+histHtml(i);
   document.getElementById("v-xls").onclick=e=>exportTemplate(i,e.target);
-  document.getElementById("v-pdf").onclick=()=>printInvoice(i);
+  document.getElementById("v-pdf").onclick=()=>printInvoice(i);const va=document.getElementById("v-adj");if(va)va.onclick=()=>openInvAdjust(id);
   const s=document.getElementById("v-sent");if(s)s.onclick=()=>confirmBox("Mark "+i.no+" as sent?","Record that this invoice package was submitted (Ariba).","Mark sent",async n=>{await commitDoc(id,x=>{x.status="Sent";x.sentAt=new Date().toISOString();x.sentBy=S.me.name;},"Marked sent"+(n?": "+n:""));},{note:"Note"});
   const v=document.getElementById("v-void");if(v)v.onclick=()=>confirmBox("Void invoice "+i.no+"?","Its unit sheets go back to Ready to invoice so they can be billed again. The voided invoice stays on record.","Void invoice",async n=>{
     const ok=await commitDoc(id,x=>{x.status="Void";x.voidAt=new Date().toISOString();x.voidBy=S.me.name;},"Voided: "+n,true);if(!ok)return;
@@ -2159,7 +2192,7 @@ async function exportTemplate(i,btn){
   try{
     const buf=await templateBuf();
     const extraRates={};i.poles.forEach(p=>{const m=extraRates[p.area]||(extraRates[p.area]={});p.lines.forEach(l=>{if(typeof l.rate==="number")m[l.key]=l.rate;});});
-    const out=await TMPL.fill(buf,{no:i.no,dateText:fmtD(i.date),po:i.po,period:i.period,packageName:i.pkg,extraRates,unitName:k=>{const u=unitInfo(k);return u.workType?u.workType+" \u2013 "+u.item:u.item;},
+    const out=await TMPL.fill(buf,{no:i.no,dateText:fmtD(i.date),po:i.po,period:i.period,packageName:i.pkg,extraRates,adj:i.adj?{label:i.adj.label,amount:i.adj.amount}:null,unitName:k=>{const u=unitInfo(k);return u.workType?u.workType+" \u2013 "+u.item:u.item;},
       poles:i.poles.map(p=>{const q={};p.lines.forEach(l=>{q[l.key]={qty:l.qty,note:l.note};});return{town:p.town,street:p.street,esPole:p.esPole,woJob:p.woJob,area:p.area,gfBy:p.gfBy,gfDate:p.gfDate,billDate:p.billDate,notes:p.notes,ticket:p.ticket,vzPole:p.vzPole,qty:q};})});
     download(new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"Eversource_Unit_Billing_"+i.date+"_"+i.no.replace(/[\\/:*?"<>|]/g,"-")+".xlsx");
     toast("Template filled. Excel recalculates the totals when the file opens.",6000);
@@ -2170,12 +2203,12 @@ function printInvoice(i){
   const head='<div class="pv-head"><div><img src="pg-logo.jpg" alt="P&amp;G Power Co."><div class="pv-from">'+(i.from||[]).map(esc).join("<br>")+'</div></div><div class="pv-title"><h1>INVOICE</h1><table class="pv-meta"><tr><td>Invoice No.</td><td><b>'+esc(i.no)+"</b></td></tr><tr><td>Invoice Date</td><td>"+esc(fmtD(i.date))+"</td></tr>"+(i.terms?"<tr><td>Terms</td><td>"+esc(i.terms)+"</td></tr>":"")+"<tr><td>Bill To</td><td>"+esc(i.customer)+"</td></tr>"+(i.po?"<tr><td>PO#</td><td>"+esc(i.po)+"</td></tr>":"")+(i.period?"<tr><td>Billing Period</td><td>"+esc(i.period)+"</td></tr>":"")+'</table></div></div><div class="pv-stripe"></div>';
   const cover='<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+' — UNIT BILLING SUMMARY</h2><table class="pv-lines"><thead><tr><th>WO / Job #</th><th>Location / Address</th><th>Pole #</th><th>Pole ID</th><th class="num">Amount</th><th>Pricing Area</th></tr></thead><tbody>'+
     i.poles.map(x=>"<tr><td>"+esc(x.woJob)+"</td><td>"+esc(x.street+", "+x.town)+"</td><td>"+esc(x.esPole)+"</td><td>"+x.slot+'</td><td class="num">'+money(x.total)+"</td><td>"+esc(x.area)+"</td></tr>").join("")+
-    '</tbody><tfoot><tr><td colspan="4" class="num">Invoice Subtotal</td><td class="num">'+money(i.total)+'</td><td></td></tr><tr><td colspan="4" class="num">TOTAL</td><td class="num">'+money(i.total)+'</td><td></td></tr></tfoot></table><p class="pv-foot">Thank you for your business</p>';
+    '</tbody><tfoot><tr><td colspan="4" class="num">Invoice Subtotal</td><td class="num">'+money(i.total)+'</td><td></td></tr>'+(i.adj?'<tr><td colspan="4" class="num">'+esc(i.adj.label)+'</td><td class="num">'+money(i.adj.amount)+"</td><td></td></tr>":"")+'<tr><td colspan="4" class="num">TOTAL</td><td class="num">'+money(invBilled(i))+'</td><td></td></tr></tfoot></table><p class="pv-foot">Thank you for your business</p>';
   const detail='<div class="pv-break"></div>'+head+'<h2 class="pv-h2">'+esc((i.customer||"").toUpperCase())+' | UNIT BASED INVOICE — FINAL INVOICE</h2><p class="pv-foot" style="margin-top:0">Approved pole locations and unit detail. See Invoice Cover for billing summary.'+(i.pkg?" Billing package: "+esc(i.pkg)+".":"")+"</p>"+
     i.poles.map(x=>'<table class="pv-lines pv-pole"><thead><tr><th colspan="5">'+esc("POLE "+x.slot+"  |  "+x.street+"  |  POLE "+x.esPole+"  |  "+String(x.town).toUpperCase()+"  |  WO #"+x.woJob+"  |  "+String(x.area).toUpperCase())+'</th></tr><tr class="subh"><td>Work Type</td><td>Unit Description</td><td class="num">Qty</td><td class="num">Unit Price</td><td class="num">Amount</td></tr></thead><tbody>'+
       x.lines.map(l=>"<tr><td>"+esc(l.workType)+"</td><td>"+esc(l.item)+'</td><td class="num">'+fmtN(l.qty)+'</td><td class="num">'+money(l.rate)+'</td><td class="num">'+money(l.ext)+"</td></tr>").join("")+
       '</tbody><tfoot><tr><td colspan="4">'+esc("POLE "+x.slot+" TOTAL  |  "+x.street+"  |  POLE "+x.esPole)+'</td><td class="num">'+money(x.total)+"</td></tr></tfoot></table>").join("")+
-    '<table class="pv-lines"><tfoot><tr><td class="num">INVOICE TOTAL (USD)</td><td class="num" style="width:140px">'+money(i.total)+"</td></tr></tfoot></table>";
+    '<table class="pv-lines"><tfoot>'+(i.adj?'<tr><td class="num">UNIT TOTAL (USD)</td><td class="num" style="width:140px">'+money(i.total)+'</td></tr><tr><td class="num">'+esc(i.adj.label.toUpperCase())+' (USD)</td><td class="num" style="width:140px">'+money(i.adj.amount)+"</td></tr>":"")+'<tr><td class="num">INVOICE TOTAL (USD)</td><td class="num" style="width:140px">'+money(invBilled(i))+"</td></tr></tfoot></table>";
   p.innerHTML='<div class="pv">'+head+cover+detail+"</div>";
   document.body.classList.add("printing");const prev=document.title;document.title="P&G Invoice "+i.no;
   const done=()=>{document.body.classList.remove("printing");document.title=prev;window.removeEventListener("afterprint",done);};

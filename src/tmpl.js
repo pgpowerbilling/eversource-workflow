@@ -53,14 +53,14 @@ async function parse(buf){
   const fi=await read(t,"Final Invoice");
   return{areas,units,layout:{perPole:per,slots:Math.min(slots,regRows||slots),ubdOrder:order},from,terms:fi.get("B7")?String(fi.get("B7")):"",customer:fi.get("F5")?String(fi.get("F5")):""};
 }
-function setCellXml(x,ref,val){
+function setCellXml(x,ref,val,force){
   const {row}=splitRef(ref);
   const cellXml=(attrs)=>{const s=/\bs="(\d+)"/.exec(attrs||"");const sa=s?' s="'+s[1]+'"':"";
     if(val==null||val==="")return'<c r="'+ref+'"'+sa+"/>";
     if(typeof val==="number"&&isFinite(val))return'<c r="'+ref+'"'+sa+"><v>"+String(val)+"</v></c>";
     return'<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+encX(val)+"</t></is></c>";};
   const cre=new RegExp('<c r="'+ref+'"(\\s[^>]*?)?(?:/>|>[\\s\\S]*?</c>)');
-  if(cre.test(x))return x.replace(cre,(m,a)=>{if(/<f[\s>]/.test(m))throw new Error("Template cell "+ref+" holds a formula and was not overwritten.");return cellXml(a);});
+  if(cre.test(x))return x.replace(cre,(m,a)=>{if(/<f[\s>]/.test(m)&&!force)throw new Error("Template cell "+ref+" holds a formula and was not overwritten.");return cellXml(a);});
   const rre=new RegExp('<row r="'+row+'"(\\s[^>]*?)?(/>|>([\\s\\S]*?)</row>)');
   const rm=rre.exec(x);
   if(rm){if(rm[2]==="/>")return x.replace(rm[0],'<row r="'+row+'"'+(rm[1]||"")+">"+cellXml("")+"</row>");
@@ -95,6 +95,11 @@ async function fill(buf,inv){
       ub=setCellXml(ub,"I"+(base+idx),Number(pl.qty[k].qty));if(pl.qty[k].note)ub=setCellXml(ub,"J"+(base+idx),pl.qty[k].note);});
   });
   fi=setCellXml(fi,"B5",inv.no);fi=setCellXml(fi,"B6",inv.dateText);if(inv.packageName)fi=setCellXml(fi,"F7",inv.packageName);
+  /* one-off adjustment: cover row 56 becomes the adjustment line and row 57 the total (subtotal + adjustment) */
+  if(inv.adj&&inv.adj.amount){const st=r=>{const m=new RegExp('<c r="'+r+'"(\\s[^>]*?)?(?:/>|>)').exec(co);const s=m&&/\bs="(\d+)"/.exec(m[1]||"");return s?' s="'+s[1]+'"':"";};
+    const sA=st("A56"),sE=st("E56");co=setCellXml(co,"A56",inv.adj.label,true);co=setCellXml(co,"E56",inv.adj.amount,true);
+    co=setCellXml(co,"A57","TOTAL");co=setCellXml(co,"E57",0);
+    co=co.replace(/<c r="A57"[^>]*?(\/>|>[\s\S]*?<\/c>)/,'<c r="A57"'+sA+' t="inlineStr"><is><t>TOTAL</t></is></c>').replace(/<c r="E57"[^>]*?(\/>|>[\s\S]*?<\/c>)/,'<c r="E57"'+sE+"><f>ROUND(E55+E56,2)</f></c>");}
   if(inv.po)co=setCellXml(co,"F8",inv.po);if(inv.period)co=setCellXml(co,"F9",inv.period);
   t.zip.file(t.sheets["Pole Register"],pr);t.zip.file(t.sheets["Unit Billing Detail"],ub);t.zip.file(t.sheets["Final Invoice"],fi);t.zip.file(t.sheets["Invoice Cover"],co);
   let wb=await t.zip.file("xl/workbook.xml").async("string");
