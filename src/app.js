@@ -11,6 +11,14 @@ const ROLES={admin:"Admin",approver:"Billing approver",gf:"Construction Manager"
 /* internal role keys are unchanged so existing logins keep working: crew = General Foreman (fills out sheets), gf = Construction Manager (signs off) */
 const ROLE_HELP={admin:"Admin — everything, incl. logins, jobs, billing and invoicing",approver:"Billing approver — final approval, invoices",gf:"Construction Manager — review and sign off unit sheets",crew:"General Foreman — fill out and submit unit sheets",viewer:"Viewer — read only"};
 const CK="pole set|c k";
+/* retired units: C&K is billed as a Level 3 pole set; Pull Pole & Dispose is no longer a unit */
+const L3="pole set|pole set completion level 3 difficulty",PULL="pole set|pull pole dispose",RETIRED=new Set([CK,PULL]);
+const SET_KEYS=["pole set|pole set completion level 1 difficulty","pole set|pole set completion level 2 difficulty",L3];
+/* qty map {key:qty}: C&K becomes one Level 3 pole set (replacing any other set level); Pull Pole & Dispose is dropped. Returns notes about what changed. */
+function normUnitQty(q){const notes=[];const n=k=>Number(String(q[k]==null?"":q[k]).trim()||0);
+  if(CK in q){const c=n(CK);delete q[CK];if(c>0){const was=SET_KEYS.filter(k=>k!==L3&&n(k)>0);was.forEach(k=>delete q[k]);q[L3]=Math.max(n(L3),c);notes.push("C&K is billed as a Level 3 pole set"+(was.length?" (replaces the other set level)":"")+".");}}
+  if(PULL in q){if(n(PULL)>0)notes.push("Pull Pole & Dispose is no longer a unit and was left off.");delete q[PULL];}
+  return notes;}
 /* Crew Daily Unit Checklist, in the order printed on the paper sheet */
 const CREW_SECTIONS=[
  ["Pole top configuration",[["pole top configuration|single phase no equipment","Single phase - no equipment"],["pole top configuration|single phase with equipment","Single phase - with equipment"],["pole top configuration|multi phase no equipment","Multi-phase - no equipment"],["pole top configuration|multi phase with equipment","Multi-phase - with equipment"],["pole top configuration|secondary no equipment","Secondary - no equipment"],["pole top configuration|secondary with equipment","Secondary - with equipment"]]],
@@ -18,7 +26,7 @@ const CREW_SECTIONS=[
  ["Riser without relocation",[["riser without relocation|single phase riser","Single-phase riser"],["riser without relocation|multi phase riser","Multi-phase riser"],["riser without relocation|secondary riser","Secondary riser"]]],
  ["Transfers",[["transfers|transfer open wire old rack","Open wire - old rack"],["transfers|transfer open wire new rack","Open wire - new rack"],["transfers|transfer open wire dead end","Open wire - dead end"],["transfers|transfer aerial cable","Aerial cable"]]],
  ["Pole hole",[["pole hole|successful hole drill","Successful hole drill"],["pole hole|unsuccessful hole drill attempt","Unsuccessful drill attempt"],["pole hole|hand dig per hour","Hand dig (hours)"],["pole hole|sidewalk cut per hour","Sidewalk cut (hours)"]]],
- ["Pole set",[["pole set|pole set completion level 1 difficulty","Set - Level 1 difficulty"],["pole set|pole set completion level 2 difficulty","Set - Level 2 difficulty"],["pole set|pole set completion level 3 difficulty","Set - Level 3 difficulty"],[CK,"C&K"],["pole set|pull pole dispose","Pull pole & dispose"]]],
+ ["Pole set",[["pole set|pole set completion level 1 difficulty","Set - Level 1 difficulty"],["pole set|pole set completion level 2 difficulty","Set - Level 2 difficulty"],["pole set|pole set completion level 3 difficulty","Set - Level 3 difficulty"]]],
  ["Reconductoring",[["reconductoring|run primary wire","Run primary wire"],["reconductoring|remove primary wire","Remove primary wire"],["reconductoring|run secondary wire","Run secondary wire"],["reconductoring|remove secondary wire","Remove secondary wire"],["reconductoring|clip in conductor","Clip in conductor"]]]];
 const CREW_KEYS=new Set(CREW_SECTIONS.flatMap(s=>s[1].map(i=>i[0])));
 
@@ -531,7 +539,7 @@ function openSheetForm(id,presetJob,only){
   if(!d.jobId&&act.length===1)d.jobId=act[0].id;
   const qty={};const notes={};(d.lines||[]).forEach(l=>{qty[l.key]=l.qty;notes[l.key]=l.note||"";});
   const others=(d.lines||[]).filter(l=>!CREW_KEYS.has(l.key)).map(l=>({key:l.key,qty:l.qty,note:l.note||""}));
-  const otherUnits=(rates()?rates().units:[]).filter(u=>!CREW_KEYS.has(u.key));
+  const otherUnits=(rates()?rates().units:[]).filter(u=>!CREW_KEYS.has(u.key)&&!RETIRED.has(u.key));
   const sec=CREW_SECTIONS.map(s=>'<div class="cl-sec"><div class="cl-h"><span>'+esc(s[0])+'</span><span>Qty</span></div>'+s[1].map(it=>'<label class="cl-row"><span>'+esc(it[1])+(it[0]===CK&&can.seePrice()?' <span class="sub">(no rate on file)</span>':"")+'</span><input type="number" inputmode="decimal" step="any" min="0" data-q="'+esc(it[0])+'" value="'+esc(qty[it[0]]==null?"":qty[it[0]])+'" aria-label="'+esc(s[0]+" — "+it[1])+' quantity"></label>').join("")+"</div>").join("");
   const body=(pick?'<fieldset class="sf-done"><legend>Is this location complete?</legend><label class="chk"><input type="radio" name="sf-done" value="yes"'+(id?"":" checked")+'> <b>Complete</b> — submit to the CM</label><label class="chk"><input type="radio" name="sf-done" value="no"'+(id?" checked":"")+'> <b>Not complete</b> — save as Started. The pole may be set and some units done; it is not sent to the CM or billed until you finish it.</label></fieldset>':"")+
     '<fieldset><legend>Sheet header</legend>'+
@@ -929,7 +937,7 @@ function openSheetUpload(jid,prefPole){
   const poles=(j.poles||[]).slice().sort((a,b)=>(a.n||0)-(b.n||0));
   const allUnits=()=>CREW_SECTIONS.flatMap(s=>s[1].map(it=>[it[0],s[0]+" — "+it[1]])).concat((rates()?rates().units:[]).filter(u=>!CREW_KEYS.has(u.key)).map(u=>[u.key,u.workType+" — "+u.item]));
   function draw(){
-    const opts=allUnits();
+    const opts=allUnits().filter(o=>!RETIRED.has(o[0]));
     list.innerHTML=entries.map((e,i)=>{const p=poleById(j,e.poleId);const lines=Object.keys(e.qty);
       return'<div class="su-card'+(e.include?"":" off")+'" data-i="'+i+'"><div class="su-head"><label class="chk"><input type="checkbox" data-inc'+(e.include?" checked":"")+'> '+pw+' '+e.page+'</label>'+
         '<label class="f" style="flex:2 1 260px">Location<select data-k="poleId"><option value="">— pick the location —</option>'+poles.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===e.poleId?" selected":"")+">#"+esc(x.n)+" "+esc(x.street)+" · "+esc(x.esPole)+" · "+esc(x.ticket)+"</option>").join("")+"</select></label>"+
@@ -966,6 +974,7 @@ function openSheetUpload(jid,prefPole){
         const w=s.warn.slice();if(!pole)w.push("Location not matched (ticket \""+(s.ticket||"blank")+"\") — pick it from the list.");else if(byP)w.push("Not matched from the sheet — assigned to the location you opened. Confirm it.");else if(byE)w.push("Matched by pole # only — confirm it's the right location.");else if(byN&&!pOk(byN))w.push("Matched by location # only — confirm it's the right pole.");
         const qty={};Object.keys(s.qty).forEach(k=>qty[k]=s.qty[k]);
         s.others.forEach(o=>{const u=matchOtherUnit(o.text);if(u)qty[u.key]=(Number(qty[u.key])||0)+o.qty;else w.push('Other unit "'+o.text+'" ('+o.qty+") isn't on the rate list — add the right unit by hand.");});
+        normUnitQty(qty).forEach(x=>w.push(x));
         const workDate=parseSheetDate(s.date);if(s.date&&!workDate)w.push('Date "'+s.date+'" couldn\'t be read.');if(!s.date)w.push("No date on the sheet — it can be filled in later (optional).");
         if(!Object.keys(qty).length)w.push("No unit quantities were read from this "+pw.toLowerCase()+".");
         const dup=pole&&!!workDate&&(ref?(j.unitRefs||[]).some(x=>x.poleId===pole.id&&x.workDate===workDate):sheets().some(x=>x.jobId===j.id&&x.poleId===pole.id&&x.workDate===workDate));if(dup)w.push("This location already has a unit sheet for this date.");
