@@ -314,7 +314,7 @@ function renderTeJob(j){
   const ss=visibleSheets().filter(s=>s.jobId===j.id);const gfList=ss.filter(s=>s.status===ST.SUB).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||String(a.no).localeCompare(String(b.no)));
   if(!S.jobTab)S.jobTab=canGfSign()&&gfList.length?"gf":"locs";const tab=S.jobTab;
   const by=st=>ss.filter(s=>s.status===st).length;const ok=ss.filter(isReady).length,inv=by(ST.INV);const locs=j.poles||[];const nDone=locs.filter(p=>p.teDone).length;const sa=jobStats(j,sheets());
-  let appr=0,apprOk=true;ss.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceSheet(s).total;if(t==null)apprOk=false;else appr+=t;});
+  const jv=jobValue(j,ss);const appr=jv.amt,apprOk=jv.ok;
   main.innerHTML='<a class="back" href="#overview">← Overview</a>'+
     '<section class="jobhead"><div><h1>'+esc(j.name)+'</h1><div class="meta"><span class="chip c-sch">T&amp;E</span>'+(j.archived?'<span class="chip c-stage">Closed</span>':'<span class="chip c-done">Active</span>')+"<span>"+esc(j.customer)+"</span>"+(j.po?"<span>PO "+esc(j.po)+"</span>":"")+(j.wo?"<span>WO / Job # "+esc(j.wo)+"</span>":"")+(teJobSet(j)?"<span>"+esc(teJobSet(j).name)+(j.teArea&&!teAreaFree(teJobSet(j))?" · "+esc(j.teArea):"")+"</span>":"")+(j.gf?"<span>CM "+esc(j.gf)+"</span>":"")+'</div></div><div class="acts">'+
       (can.newSheet()&&!j.archived?'<button class="btn primary" type="button" id="tj-imp">Upload weekly timesheet (.xlsx)</button><button class="btn" type="button" id="tj-upl">Upload Unit Sheets</button>':"")+'<button class="btn" type="button" id="tj-print"'+((j.poles||[]).length?"":" disabled")+'>Print Unit Sheets</button>'+

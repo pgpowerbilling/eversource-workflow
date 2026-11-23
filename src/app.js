@@ -756,8 +756,12 @@ function jobStats(j,ss){
   const mine=ss.filter(s=>s.jobId===j.id);const by=st=>mine.filter(s=>s.status===st).length;
   const locs=j.poles||[];const started=new Set(mine.map(s=>s.poleId).filter(Boolean));
   const doneLocs=locs.filter(p=>locDone(j,p,mine)).length;const shutL=locs.filter(p=>sdOn(p)&&!locDone(j,p,mine));const sdD=shutL.map(p=>p.shutdown.date).filter(Boolean).sort();
-  let appr=0,apprOk=true;mine.filter(s=>isReady(s)||s.status===ST.INV).forEach(s=>{const t=priceSheet(s).total;if(t==null)apprOk=false;else appr+=t;});
+  const jv=jobValue(j,mine);const appr=jv.amt,apprOk=jv.ok;
   return{locs:locs.length,started:started.size,doneLocs,sub:by(ST.SUB),ret:by(ST.RET),gf:by(ST.GF),ok:by(ST.OK)+by(ST.GF),inv:by(ST.INV),hold:mine.filter(s=>s.hold&&s.hold.on).length,appr,apprOk,sheets:mine.length,shut:shutL.length,shutNext:sdD[0]||"",shutNoDate:shutL.length-sdD.length};}
+/* job value: invoiced work counts at what was billed (invoice total incl. any adjustment); work ready to bill counts at unit prices */
+function jobValue(j,mine){let amt=0,ok=true;const invs=invoices().filter(i=>i.jobId===j.id&&i.status!=="Void");const billedIds=new Set(invs.flatMap(i=>i.sheetIds||[]));
+  mine.filter(s=>isReady(s)||(s.status===ST.INV&&!billedIds.has(s.id))).forEach(s=>{const t=priceSheet(s).total;if(t==null)ok=false;else amt+=t;});
+  invs.forEach(i=>{amt+=invBilled(i);});return{amt:cents(amt),ok};}
 function renderOverview(){
   const ss=visibleSheets();const all=jobs();const showClosed=!!S.showClosed;
   const list=all.filter(j=>showClosed||!j.archived).sort((a,b)=>(a.archived?1:0)-(b.archived?1:0)||a.name.localeCompare(b.name));
